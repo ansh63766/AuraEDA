@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+.ipynb_checkpoints/
+data/
+*.csv
+*.pdf
+*.html
+.vscode/
+.idea/
+temp_git_backup/
+venv/
+.venv/
