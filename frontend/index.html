@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuraEDA — Automated Feature Quality & Audit Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Fallback loader style. style.css overrides this */
+        body { background-color: #020617; color: #f1f5f9; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .loader { font-size: 20px; font-weight: 500; letter-spacing: 1px; font-family: 'Outfit', sans-serif; }
+    </style>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Chart.js CDN for interactive charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Plotly CDN for radar and Benford charts -->
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <!-- SortableJS CDN for draggable categories ordering -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+</head>
+<body>
+    <!-- App Container -->
+    <div id="app" class="initial-mode">
+        
+        <!-- ================= UPLOAD SCREEN ================= -->
+        <section id="upload-screen" class="screen">
+            <div class="glow-bg"></div>
+            <div class="upload-container">
+                <div class="brand">
+                    <span class="logo-dot"></span>
+                    <h2>AuraEDA</h2>
+                </div>
+                <h1>Automated Data Ingest & Quality Audit</h1>
+                <p class="subtitle">Import tabular records from local files, sample galleries, databases, APIs, or clipboards to trigger statistical diagnostic profiles.</p>
+                
+                <!-- Ingestion Tabs Headers -->
+                <div class="ingest-tabs-header">
+                    <button class="ingest-tab-btn active" data-ingest-tab="local-file">Local File</button>
+                    <button class="ingest-tab-btn" data-ingest-tab="sample-gallery">Sample Gallery</button>
+                    <button class="ingest-tab-btn" data-ingest-tab="db-connect">Database</button>
+                    <button class="ingest-tab-btn" data-ingest-tab="url-load">REST API</button>
+                    <button class="ingest-tab-btn" data-ingest-tab="clipboard-load">Tabular Clipboard</button>
+                </div>
+
+                <!-- Tab 1: Local File -->
+                <div class="ingest-tab-content" id="ingest-tab-local-file">
+                    <!-- Drag Drop Zone -->
+                    <div id="drop-zone" class="drop-zone">
+                        <input type="file" id="csv-file-input" accept=".csv,.tsv,.txt,.parquet,.json,.xlsx,.xls,.db,.sqlite,.sqlite3" style="display: none;">
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <h3>Drag & drop dataset file here</h3>
+                        <p>Supports CSV, TSV, Parquet, JSON, Excel, and SQLite databases</p>
+                    </div>
+
+                    <!-- Advanced Parser Options Toggle -->
+                    <div class="parser-accordion" style="margin-top: 15px;">
+                        <button class="accordion-header" id="parser-toggle">
+                            CSV Parser Options
+                            <svg class="chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                        <div class="accordion-content" id="parser-content">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="delimiter-select">Delimiter</label>
+                                    <select id="delimiter-select">
+                                        <option value=",">Comma (,)</option>
+                                        <option value=";">Semicolon (;)</option>
+                                        <option value="&#9;">Tab (\t)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="quotechar-select">Quote Character</label>
+                                    <select id="quotechar-select">
+                                        <option value='"'>Double Quote (")</option>
+                                        <option value="'">Single Quote (')</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="encoding-select">File Encoding</label>
+                                    <select id="encoding-select">
+                                        <option value="utf-8">UTF-8</option>
+                                        <option value="ISO-8859-1">ISO-8859-1 (Latin1)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Sample Gallery -->
+                <div class="ingest-tab-content hidden" id="ingest-tab-sample-gallery">
+                    <div class="samples-grid" id="samples-gallery-container">
+                        <!-- Populated by app.js -->
+                    </div>
+                </div>
+
+                <!-- Tab 3: Database Connection -->
+                <div class="ingest-tab-content hidden" id="ingest-tab-db-connect">
+                    <form class="ingest-form" id="db-connect-form" onsubmit="return false;">
+                        <div class="ingest-form-row">
+                            <div class="ingest-form-group">
+                                <label for="db-type-select">Engine Type</label>
+                                <select id="db-type-select">
+                                    <option value="postgresql">PostgreSQL</option>
+                                    <option value="mysql">MySQL</option>
+                                </select>
+                            </div>
+                            <div class="ingest-form-group">
+                                <label for="db-host-input">Host Address</label>
+                                <input type="text" id="db-host-input" placeholder="localhost" value="localhost">
+                            </div>
+                            <div class="ingest-form-group" style="max-width: 100px;">
+                                <label for="db-port-input">Port</label>
+                                <input type="number" id="db-port-input" placeholder="5432" value="5432">
+                            </div>
+                        </div>
+                        <div class="ingest-form-row">
+                            <div class="ingest-form-group">
+                                <label for="db-user-input">Username</label>
+                                <input type="text" id="db-user-input" placeholder="postgres" value="postgres">
+                            </div>
+                            <div class="ingest-form-group">
+                                <label for="db-pass-input">Password</label>
+                                <input type="password" id="db-pass-input" placeholder="••••••••">
+                            </div>
+                            <div class="ingest-form-group">
+                                <label for="db-name-input">Database Name</label>
+                                <input type="text" id="db-name-input" placeholder="postgres" value="postgres">
+                            </div>
+                        </div>
+                        <div class="ingest-form-group">
+                            <label for="db-query-input">SQL Query Selection</label>
+                            <textarea id="db-sql-query-input" rows="3" placeholder="SELECT * FROM my_table LIMIT 10000;"></textarea>
+                        </div>
+                        <button class="btn btn-primary" id="db-connect-submit-btn" style="align-self: flex-end;">Connect & Query</button>
+                    </form>
+                </div>
+
+                <!-- Tab 4: REST API URL -->
+                <div class="ingest-tab-content hidden" id="ingest-tab-url-load">
+                    <form class="ingest-form" id="url-load-form" onsubmit="return false;">
+                        <div class="ingest-form-group">
+                            <label for="api-url-input">HTTP GET URL Endpoint</label>
+                            <input type="url" id="api-url-input" placeholder="https://api.example.com/data">
+                        </div>
+                        <div class="ingest-form-group">
+                            <label for="api-path-input">JSONPath Navigation Selector (Optional)</label>
+                            <input type="text" id="api-path-input" placeholder="data.records">
+                        </div>
+                        <button class="btn btn-primary" id="url-load-submit-btn" style="align-self: flex-end;">Query Endpoint</button>
+                    </form>
+                </div>
+
+                <!-- Tab 5: Pasted Tabular Clipboard -->
+                <div class="ingest-tab-content hidden" id="ingest-tab-clipboard-load">
+                    <form class="ingest-form" id="clipboard-load-form" onsubmit="return false;">
+                        <div class="ingest-form-group">
+                            <label for="clipboard-text-area">Paste Tabular Text (TSV, CSV, or copied rows)</label>
+                            <textarea id="clipboard-text-area" class="clipboard-textarea" placeholder="Col1,Col2,Col3&#10;Val1,Val2,Val3&#10;Val4,Val5,Val6"></textarea>
+                        </div>
+                        <button class="btn btn-primary" id="clipboard-load-submit-btn" style="align-self: flex-end;">Load Pasted Rows</button>
+                    </form>
+                </div>
+
+                <div id="upload-status" class="status-msg hidden"></div>
+            </div>
+        </section>
+
+        <!-- Excel Sheet Selector Modal -->
+        <div class="modal-overlay hidden" id="excel-sheet-modal">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Select Excel Worksheet</h3>
+                    <button class="modal-close-btn" id="excel-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted" style="font-size: 13px; margin-bottom: 15px;">Multiple sheets detected in the workbook. Select the worksheet to load:</p>
+                    <ul class="modal-select-list" id="excel-sheets-list">
+                        <!-- Sheets dynamically loaded -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- SQLite Table Selector Modal -->
+        <div class="modal-overlay hidden" id="sqlite-table-modal">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Select SQLite Database Table</h3>
+                    <button class="modal-close-btn" id="sqlite-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted" style="font-size: 13px; margin-bottom: 15px;">Multiple tables detected in database file. Select the table to load:</p>
+                    <ul class="modal-select-list" id="sqlite-tables-list">
+                        <!-- Tables dynamically loaded -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Merge Wizard Modal -->
+        <div class="modal-overlay hidden" id="merge-wizard-modal">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Tabular Merge & Join Wizard</h3>
+                    <button class="modal-close-btn" id="merge-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form class="ingest-form" id="merge-wizard-form" onsubmit="return false;">
+                        <div class="ingest-form-group">
+                            <label for="merge-dataset-a">Primary Dataset (Left/Upper)</label>
+                            <select id="merge-dataset-a">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                        <div class="ingest-form-group">
+                            <label for="merge-dataset-b">Secondary Dataset (Right/Lower)</label>
+                            <select id="merge-dataset-b">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                        <div class="ingest-form-group">
+                            <label for="merge-type-select">Merge Configuration</label>
+                            <select id="merge-type-select">
+                                <option value="join">Join Columns Horizontally (pd.merge)</option>
+                                <option value="stack">Stack Rows Vertically (pd.concat)</option>
+                            </select>
+                        </div>
+                        <div id="merge-join-fields">
+                            <div class="ingest-form-group">
+                                <label for="merge-join-how">Join Type</label>
+                                <select id="merge-join-how">
+                                    <option value="inner">Inner Join (Common records only)</option>
+                                    <option value="left">Left Join (Keep all left records)</option>
+                                    <option value="right">Right Join (Keep all right records)</option>
+                                    <option value="outer">Outer Join (Keep all records)</option>
+                                </select>
+                            </div>
+                            <div class="ingest-form-row" style="margin-top: 10px;">
+                                <div class="ingest-form-group">
+                                    <label for="merge-left-key">Left Key Column</label>
+                                    <select id="merge-left-key">
+                                        <!-- Columns of left -->
+                                    </select>
+                                </div>
+                                <div class="ingest-form-group">
+                                    <label for="merge-right-key">Right Key Column</label>
+                                    <select id="merge-right-key">
+                                        <!-- Columns of right -->
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" id="btn-merge-cancel">Cancel</button>
+                    <button class="btn btn-primary btn-sm" id="btn-merge-submit">Execute Merge</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= MAIN AUDIT DASHBOARD ================= -->
+        <main id="dashboard" class="screen hidden">
+            
+            <!-- Global Top Bar -->
+            <header class="top-bar">
+                <div class="top-left">
+                    <div class="brand cursor-pointer" id="logo-btn">
+                        <span class="logo-dot"></span>
+                        <h2>AuraEDA</h2>
+                    </div>
+                    <div class="dataset-tabs" id="dataset-tabs-container">
+                        <!-- Dynamic tabs injected by app.js -->
+                    </div>
+                    <button class="btn-add-tab" id="btn-add-tab" title="Load New Dataset" style="margin-right: 5px;">+</button>
+                    <button class="btn-merge-wizard" id="btn-open-merge-wizard" title="Open Merge & Join Wizard">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                    </button>
+                </div>
+
+                <div class="top-right">
+                    <!-- Sun/Moon Theme Toggle -->
+                    <button class="theme-toggle" id="theme-toggle-btn" title="Toggle Theme">
+                        <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                    </button>
+
+                    <!-- Target Column Selector -->
+                    <div class="target-selector">
+                        <label for="target-col-select">Target Variable:</label>
+                        <select id="target-col-select">
+                            <option value="">-- Select Target (Enables Leakage & Drift) --</option>
+                        </select>
+                    </div>
+
+                    <!-- Action Exports -->
+                    <button class="btn btn-secondary" id="export-html-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        HTML Report
+                    </button>
+                    <button class="btn btn-primary" id="export-pdf-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        PDF Report
+                    </button>
+                </div>
+            </header>
+
+            <!-- Downsampling Warning Banner -->
+            <div id="downsample-banner" class="downsample-banner hidden">
+                <div class="banner-content">
+                    <svg class="warning-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    <span>Showing a random sample of 50,000 rows for performance. Full dataset used for cleaning operations.</span>
+                </div>
+                <div class="banner-actions">
+                    <label class="toggle-container">
+                        <input type="checkbox" id="chk-run-full-dataset">
+                        <span class="toggle-text">Run full dataset anyway (at your own risk)</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Grid Container -->
+            <div class="dashboard-body">
+                
+                <!-- Left Sidebar Nav -->
+                <aside class="sidebar">
+                    <nav class="nav-links" style="overflow-y: auto; height: calc(100vh - 120px); display: flex; flex-direction: column;">
+                        
+                        <!-- Diagnose Folder -->
+                        <div class="sidebar-folder">
+                            <button class="folder-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                    <svg class="folder-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                                    Diagnose
+                                </span>
+                                <svg class="folder-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 12px; height: 12px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <div class="folder-items">
+                                <button class="nav-item active" data-tab="overview">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z" /></svg>
+                                    Overview
+                                </button>
+                                <button class="nav-item" data-tab="alerts">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                    Quality Alerts
+                                    <span class="sidebar-badge hidden" id="alerts-count">0</span>
+                                </button>
+                                <button class="nav-item" data-tab="missing">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 9.172V5L8 4z" /></svg>
+                                    Missingness
+                                </button>
+                                <button class="nav-item" data-tab="gdpr">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                    GDPR & PII Audit
+                                    <span class="sidebar-badge hidden" id="gdpr-pii-count">0</span>
+                                </button>
+                                <button class="nav-item" data-tab="benfords">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10" /></svg>
+                                    Benford's Law Audit
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Explore Folder -->
+                        <div class="sidebar-folder">
+                            <button class="folder-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                    <svg class="folder-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2m-6 0h4" /></svg>
+                                    Explore
+                                </span>
+                                <svg class="folder-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 12px; height: 12px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <div class="folder-items">
+                                <button class="nav-item" data-tab="features">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                                    Features Explorer
+                                </button>
+                                <button class="nav-item" data-tab="correlations">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
+                                    Correlations & VIF
+                                </button>
+                                <button class="nav-item" data-tab="advanced-eda">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10" /></svg>
+                                    Advanced EDA
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Clean Folder -->
+                        <div class="sidebar-folder">
+                            <button class="folder-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                    <svg class="folder-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    Clean
+                                </span>
+                                <svg class="folder-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 12px; height: 12px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <div class="folder-items">
+                                <button class="nav-item" data-tab="wrangler">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+                                    Data Wrangler
+                                </button>
+                                <button class="nav-item" data-tab="datasheet">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                    Data Sheet
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Model Prep Folder -->
+                        <div class="sidebar-folder">
+                            <button class="folder-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                    <svg class="folder-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 9.172V5L8 4z" /></svg>
+                                    Model Prep
+                                </span>
+                                <svg class="folder-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 12px; height: 12px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <div class="folder-items">
+                                <button class="nav-item" data-tab="leakage-drift">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                    Leakage & Drift
+                                </button>
+                                <button class="nav-item" data-tab="split-drift-audit">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2m-6 0h4" /></svg>
+                                    Split & Drift Audit
+                                </button>
+                                <button class="nav-item" data-tab="importance-pca">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                    Importance & PCA
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Tools Folder -->
+                        <div class="sidebar-folder">
+                            <button class="folder-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                    <svg class="folder-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                    Tools
+                                </span>
+                                <svg class="folder-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 12px; height: 12px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <div class="folder-items">
+                                <button class="nav-item" data-tab="sql">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                    SQL Sandbox
+                                </button>
+                                <button class="nav-item" data-tab="chat">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                                    AuraEDA Copilot
+                                </button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <!-- Sidebar Footer Settings Gear -->
+                    <div style="margin-top: auto; padding: 10px 10px 0; border-top: 1px solid var(--slate-800); display: flex; align-items: center; justify-content: space-between;">
+                        <button id="settings-toggle-btn" style="background: transparent; border: none; color: var(--slate-400); cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; font-family: var(--font-sans); width: 100%;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;" class="gear-icon"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            Global Settings
+                        </button>
+                    </div>
+                </aside>
+
+                <!-- Center Content Drawer -->
+                <div class="content-pane">
+                    
+                    <!-- LOBBYING SCREEN WHILE PROCESSING -->
+                    <div id="loading-overlay" class="overlay hidden">
+                        <div class="loader-content">
+                            <div class="spinner"></div>
+                            <h3>Analyzing Dataset...</h3>
+                            <p id="analysis-step">Fitting surrogate models and generating LLM commentaries</p>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: OVERVIEW ================= -->
+                    <div class="tab-content" id="tab-overview">
+                        <div class="hero-header">
+                            <div class="overview-summary">
+                                <h2>Dataset Health Overview</h2>
+                                <p>Comprehensive statistical breakdown of shapes, cell counts, and memory allocations.</p>
+                            </div>
+                            
+                            <!-- Gauge score -->
+                            <div class="score-card">
+                                <div class="score-gauge-box">
+                                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                                        <circle class="gauge-track" cx="50" cy="50" r="40" />
+                                        <circle class="gauge-fill" id="gauge-score-fill" cx="50" cy="50" r="40" />
+                                    </svg>
+                                    <div class="gauge-number" id="gauge-score-text">100</div>
+                                </div>
+                                <div class="score-info">
+                                    <h4>Integrity Score</h4>
+                                    <p id="health-description">A structural health grade deducted by critical anomalies.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Statistics Cards -->
+                        <div class="stats-cards-grid">
+                            <div class="mini-card">
+                                <span class="card-label">Total Row Count</span>
+                                <h3 id="stat-rows">0</h3>
+                            </div>
+                            <div class="mini-card">
+                                <span class="card-label">Total Feature Count</span>
+                                <h3 id="stat-cols">0</h3>
+                            </div>
+                            <div class="mini-card">
+                                <span class="card-label">Null Cells Detected</span>
+                                <h3 id="stat-nulls">0</h3>
+                            </div>
+                            <div class="mini-card">
+                                <span class="card-label">Est. Memory Usage</span>
+                                <h3 id="stat-memory">0 KB</h3>
+                            </div>
+                        </div>
+
+                        <!-- Radar & RAM Downcaster Split -->
+                        <div class="split-view" style="margin-top: 20px; margin-bottom: 20px;">
+                            <!-- Radar integrity breakdown chart -->
+                            <div class="card flex-1">
+                                <h3 class="card-title">6-Axis Data Integrity Diagnostic Breakdown</h3>
+                                <p class="card-subtitle">Measures quality dimensions on a 100-point index for target-ready modeling checks.</p>
+                                <div id="integrity-radar-chart" style="height: 340px; margin-top: 10px;"></div>
+                            </div>
+                            
+                            <!-- RAM Optimization Advisor -->
+                            <div class="card sidebar-card" id="ram-optimization-card" style="width: 440px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <h3 class="card-title">Memory downcasting Advisor</h3>
+                                    <span class="badge badge-success" id="ram-savings-badge" style="font-size: 10px; font-weight: 700; padding: 4px 8px;">Savings: 0 KB</span>
+                                </div>
+                                <p class="card-subtitle">Convert features to optimal numeric bits or text categories to release system RAM pressure.</p>
+                                <div class="table-container" style="max-height: 250px; overflow-y: auto; margin-top: 10px;">
+                                    <table style="font-size: 11.5px;">
+                                        <thead>
+                                            <tr>
+                                                <th>Feature</th>
+                                                <th>Current</th>
+                                                <th>Suggested</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ram-opt-tbody">
+                                            <tr><td colspan="4" class="text-muted" style="text-align: center; padding: 15px;">No downcast recommendations.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <button class="btn btn-primary btn-sm" id="btn-apply-all-downcasts" style="width: 100%; margin-top: 12px; font-size:11px;">Apply All Downcasts</button>
+                            </div>
+                        </div>
+
+                        <!-- Schema Table -->
+                        <div class="card">
+                            <h3 class="card-title">Dataset Features & Schema Types</h3>
+                            <div class="table-container">
+                                <table id="schema-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Feature Column</th>
+                                            <th>Physical Dtype</th>
+                                            <th>Semantic Type</th>
+                                            <th>Imputation Status</th>
+                                            <th>Variance / Alert Priority</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="schema-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: ALERTS ================= -->
+                    <div class="tab-content hidden" id="tab-alerts">
+                        <div class="section-title-box">
+                            <h2>Dataset Anomalies & Health Alerts</h2>
+                            <p>Data quality issues mapped by alert categories and operational threat severity.</p>
+                        </div>
+
+                        <!-- Commentary Box -->
+                        <div class="llm-box" id="alerts-llm-commentary">
+                            <div class="llm-badge">LLM Insights</div>
+                            <p id="alerts-commentary-text">Generating commentary...</p>
+                        </div>
+
+                        <div class="alerts-container" id="alerts-list-container">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: MISSINGNESS ================= -->
+                    <div class="tab-content hidden" id="tab-missing">
+                        <div class="section-title-box">
+                            <h2>Missingness Patterns & Imputations</h2>
+                            <p>Map structural null frequencies, identify missingness correlations, and get code-ready imputation advice.</p>
+                        </div>
+
+                        <div class="llm-box" id="missing-llm-commentary">
+                            <div class="llm-badge">LLM Insights</div>
+                            <p id="missing-commentary-text">Generating commentary...</p>
+                        </div>
+
+                        <div class="split-view">
+                            <!-- Left: Recommendation Table -->
+                            <div class="card flex-1">
+                                <h3 class="card-title">Imputation Advisor & Snippets</h3>
+                                <div class="table-container">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Feature</th>
+                                                <th>Null Rate</th>
+                                                <th>Recommended Action</th>
+                                                <th>Impute Snippet</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="missing-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Right: Correlation Plot -->
+                            <div class="card sidebar-card" id="null-corr-card">
+                                <h3 class="card-title">Nullity Correlation Heatmap</h3>
+                                <p class="card-subtitle">Identifies if values in Column A are missing in connection with Column B.</p>
+                                <div class="heatmap-wrapper" id="null-heatmap-container">
+                                    <canvas id="null-correlation-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: GDPR & PII ================= -->
+                    <div class="tab-content hidden" id="tab-gdpr">
+                        <div class="section-title-box">
+                            <h2>GDPR Compliance & PII Scanner</h2>
+                            <p>Scans dataset columns for Personally Identifiable Information (PII) like emails, phones, SSNs, and names, and provides one-click hashing or masking operations.</p>
+                        </div>
+                        <div class="card">
+                            <h3 class="card-title">PII Flagged Features</h3>
+                            <p class="card-subtitle">A list of features flagged containing PII characteristics. You can apply masking or hashing directly.</p>
+                            <div class="table-container" style="margin-top: 15px;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Feature Column</th>
+                                            <th>Inferred Pattern / Reason</th>
+                                            <th>Suggested Action</th>
+                                            <th>Operations</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="gdpr-pii-tbody">
+                                        <tr><td colspan="4" class="text-success" style="text-align: center; padding: 25px;">No PII or sensitive features detected!</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: BENFORD'S LAW ================= -->
+                    <div class="tab-content hidden" id="tab-benfords">
+                        <div class="section-title-box">
+                            <h2>Benford's Law Frequency Analysis</h2>
+                            <p>Analyzes the distribution of first significant digits in numeric columns (financial transactions, populations, sizes) to detect anomalies or artificial overrides.</p>
+                        </div>
+                        <div class="split-view">
+                            <div class="card sidebar-card" style="width: 280px; margin-bottom:0;">
+                                <h3 class="card-title">Select Column</h3>
+                                <p class="card-subtitle">Choose a positive numeric variable spanning multiple orders of magnitude.</p>
+                                <select id="benford-col-select" style="width: 100%; margin-top: 15px; background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 10px; border-radius: 8px; font-size:13px;"></select>
+                            </div>
+                            <div class="card flex-1" style="margin-bottom:0;">
+                                <h3 class="card-title">First Digit Frequency vs Benford's Law</h3>
+                                <div id="benford-chart" style="height: 380px; margin-top: 10px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: FEATURES EXPLORER ================= -->
+                    <div class="tab-content hidden" id="tab-features">
+                        <div class="feature-layout">
+                            <!-- Left Column: Columns Sidebar -->
+                            <div class="feature-sidebar card">
+                                <h3>Features</h3>
+                                <input type="text" id="feature-search" placeholder="Search feature name...">
+                                <div class="feature-list" id="feature-list-items">
+                                    <!-- Dynamic -->
+                                </div>
+                            </div>
+
+                            <!-- Right Column: Detail View -->
+                            <div class="feature-main flex-1">
+                                <div id="no-feature-selected" class="no-selection-card">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
+                                    <h3>Select a feature to explore</h3>
+                                    <p>Select any feature column on the left to show descriptive statistics, distributions, outlier ranges, and ML processing advice.</p>
+                                </div>
+
+                                <div id="feature-detail-view" class="hidden">
+                                    <div class="feature-detail-header">
+                                        <div>
+                                            <h2 id="active-feature-name">FeatureName</h2>
+                                            <span class="badge" id="active-feature-type">numerical</span>
+                                        </div>
+                                        <div class="stat-pills">
+                                            <div class="pill">Missing: <span id="feat-pill-missing">0%</span></div>
+                                            <div class="pill">Cardinality: <span id="feat-pill-card">0</span></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Commentary -->
+                                    <div class="llm-box" style="margin-top: 15px;">
+                                        <div class="llm-badge">LLM Insights</div>
+                                        <p id="feature-commentary-text">Generating commentary...</p>
+                                    </div>
+
+                                    <!-- Chart and Grid Layout -->
+                                    <div class="split-view">
+                                        <!-- Left stats table -->
+                                        <div class="card flex-1">
+                                            <h3 class="card-title">Descriptive Properties</h3>
+                                            <div class="table-container">
+                                                <table class="simple-table">
+                                                    <tbody id="feature-stats-tbody"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        <!-- Right Chart -->
+                                        <div class="card chart-card flex-1">
+                                            <h3 class="card-title">Value Distribution</h3>
+                                            <div class="histogram-wrapper">
+                                                <canvas id="feature-distribution-chart"></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: CORRELATIONS ================= -->
+                    <div class="tab-content hidden" id="tab-correlations">
+                        <div class="section-title-box">
+                            <h2>Feature Relationships & Multicollinearity</h2>
+                            <p>Detect collinear redundancies, analyze VIF (Variance Inflation Factors), and find highly correlated feature pairs.</p>
+                        </div>
+
+                        <div class="llm-box" id="correlations-llm-commentary">
+                            <div class="llm-badge">LLM Insights</div>
+                            <p id="correlations-commentary-text">Generating commentary...</p>
+                        </div>
+
+                        <div class="split-view">
+                            <!-- Left: Tables -->
+                            <div class="flex-1 space-y-20">
+                                <div class="card">
+                                    <h3 class="card-title">High Correlation Pairs</h3>
+                                    <div class="table-container">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Feature 1</th>
+                                                    <th>Feature 2</th>
+                                                    <th>Pearson R</th>
+                                                    <th>Severity</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="corr-pairs-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div class="card">
+                                    <h3 class="card-title">Variance Inflation Factors (VIF)</h3>
+                                    <p class="card-subtitle">VIF scores &gt; 5 indicate multi-variable redundancies which inflate coefficient errors.</p>
+                                    <div class="table-container">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Feature Column</th>
+                                                    <th>VIF Score</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="vif-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right Heatmap Image -->
+                            <div class="card sidebar-card" id="heatmap-card">
+                                <h3 class="card-title">Correlation Heatmap</h3>
+                                <p class="card-subtitle">Static publication-grade Pearson matrix generated by seaborn backend.</p>
+                                <div class="seaborn-heatmap-container" id="correlation-heatmap-container">
+                                    <!-- Populated via image -->
+                                    <div style="text-align: center; padding: 40px; color: var(--slate-400);">No heatmap available. Check numeric features.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: LEAKAGE & DRIFT ================= -->
+                    <div class="tab-content hidden" id="tab-leakage-drift">
+                        
+                        <!-- If Target column is not selected, display prompt card -->
+                        <div id="target-unselected-panel" class="target-prompt-card">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <h2>Target Column Analysis Pending</h2>
+                            <p>To compute Mutual Information, run Target Leakage audits, and train surrogate booster models for drift simulations, please select a Target variable in the top right header menu.</p>
+                        </div>
+
+                        <!-- Target selected content -->
+                        <div id="target-selected-panel" class="hidden">
+                            <div class="section-title-box">
+                                <h2>Leakage Audit & Model Drift Vulnerability</h2>
+                                <p>Target Variable: <strong id="active-target-display">colname</strong> &bull; Assessment Type: <strong id="target-type-display">Classification</strong></p>
+                            </div>
+
+                            <!-- Target Leakage Section -->
+                            <div class="card" style="margin-bottom: 30px;">
+                                <h3 class="card-title">Target Leakage Detection</h3>
+                                <p class="card-subtitle">Identifies features with suspiciously high validation accuracy (AUC/R² &gt; 0.95), suggesting they are direct proxies or future leakage data.</p>
+                                
+                                <div class="llm-box" style="margin-top: 15px;">
+                                    <div class="llm-badge">LLM Insights</div>
+                                    <p id="leakage-commentary-text">Generating commentary...</p>
+                                </div>
+
+                                <div class="table-container" style="margin-top: 15px;">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Feature Column</th>
+                                                <th>Mutual Info</th>
+                                                <th>Single CV Score</th>
+                                                <th>Threat Assessment</th>
+                                                <th>Reason / Indicator</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="leakage-tbody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Model Drift Section -->
+                            <div class="split-view">
+                                <div class="card flex-1">
+                                    <h3 class="card-title">Feature Drift Sensitivity Analysis</h3>
+                                    <p class="card-subtitle">Measures surrogate metric drops (accuracy / R²) when features are perturbed by 10%. Highly sensitive columns are model vulnerabilities.</p>
+                                    
+                                    <div class="llm-box" style="margin-top: 15px; margin-bottom: 15px;">
+                                        <div class="llm-badge">LLM Insights</div>
+                                        <p id="drift-commentary-text">Generating commentary...</p>
+                                    </div>
+
+                                    <div class="table-container">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Feature Column</th>
+                                                    <th>Baseline CV</th>
+                                                    <th>Perturbed CV</th>
+                                                    <th>Metric Drop</th>
+                                                    <th>Vulnerability</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="drift-tbody"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div class="card sidebar-card" id="drift-chart-card">
+                                    <h3 class="card-title">Drift Sensitivity Plot</h3>
+                                    <p class="card-subtitle">Vulnerability drop levels on the validation dataset.</p>
+                                    <div id="drift-chart-container" class="seaborn-heatmap-container">
+                                        <!-- Image wrapper -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: SPLIT & DRIFT AUDIT ================= -->
+                    <div class="tab-content hidden" id="tab-split-drift-audit">
+                        <div class="section-title-box">
+                            <h2>Pre-Modeling Split & Covariate Drift Audit</h2>
+                            <p>Split the dataset to simulate Train/Test segments, inspect statistical covariate shifts, and check baseline model benchmarks.</p>
+                        </div>
+
+                        <div class="split-view" style="margin-bottom: 25px;">
+                            <!-- Controls -->
+                            <div class="card flex-1" style="margin-bottom: 0;">
+                                <h3 class="card-title">Split Configuration</h3>
+                                <div style="display: flex; align-items: center; gap: 20px; margin-top: 15px;">
+                                    <div style="flex: 1;">
+                                        <label for="split-ratio-range" style="font-size:12px; color:var(--slate-400);">Train Ratio: <span id="split-ratio-val">70%</span></label>
+                                        <input type="range" id="split-ratio-range" min="50" max="95" value="70" style="width: 100%; margin-top: 5px;">
+                                    </div>
+                                    <button class="btn btn-primary" id="run-split-btn" style="margin-top: 10px;">Simulate Train/Test Split</button>
+                                </div>
+                            </div>
+
+                            <!-- Baseline Model Benchmark -->
+                            <div class="card flex-1" style="margin-bottom: 0;">
+                                <h3 class="card-title">Baseline Model Benchmark</h3>
+                                <p class="card-subtitle" style="margin-bottom: 10px;">Compares a baseline predictor against dummy models on the split validation set.</p>
+                                <div id="benchmark-scores-box" style="display: flex; gap: 15px; margin-top: 5px;">
+                                    <div class="mini-card" style="padding: 10px 15px; flex: 1; margin-bottom: 0;">
+                                        <span class="card-label" style="font-size: 9px;">Dummy Model</span>
+                                        <h4 id="dummy-baseline-score" style="font-size: 18px; font-weight: 700; color: var(--slate-400); margin-top: 3px;">0.00</h4>
+                                    </div>
+                                    <div class="mini-card" style="padding: 10px 15px; flex: 1; margin-bottom: 0; border-color: var(--cyan-600);">
+                                        <span class="card-label" style="font-size: 9px; color: var(--cyan-500);">Gradient Booster</span>
+                                        <h4 id="model-baseline-score" style="font-size: 18px; font-weight: 700; color: var(--cyan-500); margin-top: 3px;">0.00</h4>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Split Stats -->
+                        <div class="stats-cards-grid">
+                            <div class="mini-card">
+                                <span class="card-label">Train Split Rows</span>
+                                <h3 id="split-train-rows">0</h3>
+                            </div>
+                            <div class="mini-card">
+                                <span class="card-label">Test Split Rows</span>
+                                <h3 id="split-test-rows">0</h3>
+                            </div>
+                            <div class="mini-card">
+                                <span class="card-label">Train Split Nulls</span>
+                                <h3 id="split-train-nulls">0</h3>
+                            </div>
+                            <div class="mini-card">
+                                <span class="card-label">Test Split Nulls</span>
+                                <h3 id="split-test-nulls">0</h3>
+                            </div>
+                        </div>
+
+                        <div class="split-view">
+                            <!-- Left: Drift Table -->
+                            <div class="card flex-1">
+                                <h3 class="card-title">Covariate Drift Report</h3>
+                                <p class="card-subtitle">KS-test and Chi-Square contingency check for statistical drift (p-value &lt; 0.05 indicates population shift).</p>
+                                <div class="table-container">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Feature Column</th>
+                                                <th>Drift Test</th>
+                                                <th>P-Value</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="drift-audit-tbody">
+                                            <tr><td colspan="4" class="text-muted" style="text-align: center; padding: 30px;">Trigger Train/Test split simulation to compute drift diagnostics.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Right: Distribution Plot -->
+                            <div class="card sidebar-card" style="width: 420px;">
+                                <h3 class="card-title">Split Distribution Comparison</h3>
+                                <div class="form-group" style="margin-bottom: 15px;">
+                                    <label for="split-compare-col-select">Select Variable:</label>
+                                    <select id="split-compare-col-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size:12.5px;">
+                                        <option value="">-- Select Feature --</option>
+                                    </select>
+                                </div>
+                                <div class="histogram-wrapper" style="height: 230px;" id="split-compare-chart-container">
+                                    <canvas id="split-compare-distribution-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: DATA WRANGLER ================= -->
+                    <div class="tab-content hidden" id="tab-wrangler">
+                        <div class="section-title-box">
+                            <h2>Interactive Preprocessing & Feature Engineering</h2>
+                            <p>Drop columns, impute null cells, clip outliers, scale features, or extract datetime components. AuraEDA compiles your operations into a production Scikit-Learn Pipeline.</p>
+                        </div>
+
+                        <div class="split-view">
+                            <!-- Left: Wrangle Pipeline Builder -->
+                            <div class="card flex-1" style="margin-bottom: 0;">
+                                <h3 class="card-title">Add Transformation Step</h3>
+                                <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); margin-top: 15px; gap: 15px;">
+                                    <div class="form-group">
+                                        <label for="wrangle-col-select">Feature Column</label>
+                                        <select id="wrangle-col-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px;"></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="wrangle-action-select">Wrangle Operation</label>
+                                        <select id="wrangle-action-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px;">
+                                            <option value="drop">Drop Column</option>
+                                            <option value="impute">Impute Nulls</option>
+                                            <option value="scale">Scale Variable</option>
+                                            <option value="clip">Clip Outliers (Winsorize)</option>
+                                            <option value="transform">Power Transforms</option>
+                                            <option value="onehot">One-Hot Encode</option>
+                                            <option value="bin">Discretize / Bin</option>
+                                            <option value="target_encode">Target Encode</option>
+                                            <option value="frequency_encode">Frequency Encode</option>
+                                            <option value="binary_encode">Binary Encode</option>
+                                            <option value="rare_label">Rare Label Grouping</option>
+                                            <option value="ordinal_encode">Ordinal Encode</option>
+                                            <option value="polynomial">Polynomial Features</option>
+                                            <option value="group_aggregate">Group Aggregation</option>
+                                            <option value="custom_formula">Custom AST Formula</option>
+                                            <option value="feature_cross">Feature Cross</option>
+                                            <option value="time_impute">Time-Ordering Imputation</option>
+                                            <option value="cyclical_time">Cyclical Time sin/cos</option>
+                                            <option value="extract_datetime">Extract Datetime Parts</option>
+                                            <option value="text_length">NLP Text Lengths</option>
+                                            <option value="add_missing_indicator">Null Binary Flag</option>
+                                            <option value="row_normalize">Row Normalization</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" id="wrangle-strategy-group">
+                                        <label for="wrangle-strategy-select">Transformation Strategy</label>
+                                        <select id="wrangle-strategy-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px;">
+                                            <!-- Updated dynamically -->
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="display: flex; justify-content: flex-end; margin-top: 15px; gap: 10px;">
+                                    <button class="btn btn-secondary btn-sm" id="clear-wrangle-btn">Reset All</button>
+                                    <button class="btn btn-primary btn-sm" id="add-wrangle-btn">Add Pipeline Step</button>
+                                </div>
+
+                                <h4 style="margin-top: 25px; margin-bottom: 10px; font-size: 13px; font-weight: 600;">Active Pipeline Steps</h4>
+                                <div id="applied-steps-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 160px; overflow-y: auto; background-color: var(--slate-950); padding: 10px; border-radius: 8px;">
+                                    <div class="text-muted" style="font-size:12.5px; text-align: center; padding: 10px;">No transformations in queue. Add a step above.</div>
+                                </div>
+
+                                <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+                                    <button class="btn btn-primary" id="execute-wrangle-btn">Execute Pipeline & Update Audit</button>
+                                </div>
+                            </div>
+
+                            <!-- Right: Before / After Comparison -->
+                            <div class="card sidebar-card" style="width: 380px; margin-bottom: 0;">
+                                <h3 class="card-title">Before vs. After Health</h3>
+                                <p class="card-subtitle">Live structural metrics comparing original vs cleaned state.</p>
+                                
+                                <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 15px;">
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--slate-700); padding-bottom: 8px;">
+                                        <span class="text-muted" style="font-size: 13px;">Row Count</span>
+                                        <span style="font-size:13px;"><strong id="wrangle-before-rows">0</strong> &rarr; <strong id="wrangle-after-rows" class="text-success">0</strong></span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--slate-700); padding-bottom: 8px;">
+                                        <span class="text-muted" style="font-size: 13px;">Columns Count</span>
+                                        <span style="font-size:13px;"><strong id="wrangle-before-cols">0</strong> &rarr; <strong id="wrangle-after-cols" class="text-success">0</strong></span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--slate-700); padding-bottom: 8px;">
+                                        <span class="text-muted" style="font-size: 13px;">Null Cell Count</span>
+                                        <span style="font-size:13px;"><strong id="wrangle-before-nulls">0</strong> &rarr; <strong id="wrangle-after-nulls" class="text-success">0</strong></span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; padding-bottom: 8px;">
+                                        <span class="text-muted" style="font-size: 13px;">Integrity Score</span>
+                                        <span style="font-size:13px;"><strong id="wrangle-before-score">0</strong> &rarr; <strong id="wrangle-after-score" class="text-success">0</strong></span>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 30px;">
+                                    <button class="btn btn-secondary" id="wrangle-download-csv-btn" style="width: 100%; justify-content: center;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                        Download Cleaned CSV
+                                    </button>
+                                    <button class="btn btn-primary" id="wrangle-download-pkl-btn" style="width: 100%; justify-content: center; background: linear-gradient(135deg, var(--indigo-500) 0%, var(--cyan-500) 100%); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                        Download Pipeline (.pkl)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Preprocessing Code Terminal -->
+                        <div class="card" style="margin-top: 25px;">
+                            <div class="console-header" style="display: flex; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span class="dot-btn red"></span>
+                                    <span class="dot-btn yellow"></span>
+                                    <span class="dot-btn green"></span>
+                                    <span class="console-title">pipeline_preprocessing.py</span>
+                                </div>
+                                <button id="copy-pipeline-code-btn" style="background:transparent; border:none; color:var(--slate-400); font-size:11px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:4px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:12px; height:12px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                    Copy Code
+                                </button>
+                            </div>
+                            <pre id="wrangle-pipeline-code-block" style="background-color: var(--slate-950); padding: 15px; border-radius: 0 0 8px 8px; color: var(--cyan-500); font-family: monospace; font-size: 13px; overflow-x: auto; margin: 0; max-height: 240px; overflow-y: auto;"># Execute transformations and run wrangler to generate pandas script code.</pre>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: IMPORTANCE & PCA ================= -->
+                    <div class="tab-content hidden" id="tab-importance-pca">
+                        <div class="section-title-box">
+                            <h2>PCA 2D Projections & Permutation Feature Importance</h2>
+                            <p>Analyze feature groupings in principal components and evaluate feature weights fitted on surrogate classifiers.</p>
+                        </div>
+
+                        <div class="split-view">
+                            <!-- PCA Projection Scatter Plot -->
+                            <div class="card flex-1">
+                                <h3 class="card-title">PCA 2D Cluster Mapping</h3>
+                                <p class="card-subtitle" id="pca-variance-details">Reduces numeric feature dimensions to 2D components. Color indicates target labels (if selected).</p>
+                                <div class="histogram-wrapper" style="height: 280px;" id="pca-chart-container">
+                                    <canvas id="pca-scatter-chart"></canvas>
+                                </div>
+                                <div style="margin-top: 15px; font-size: 12px; color: var(--slate-400);" id="pca-cols-used-box">
+                                    Columns Audited: --
+                                </div>
+                            </div>
+
+                            <!-- Permutation Importance Bar Chart -->
+                            <div class="card flex-1">
+                                <h3 class="card-title">Surrogate Permutation Feature Importance</h3>
+                                <p class="card-subtitle">Measures column impact by logging target metric drop when feature columns are shuffled randomly.</p>
+                                <div class="histogram-wrapper" style="height: 280px;" id="importance-chart-container">
+                                    <canvas id="importance-bar-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: ADVANCED EDA ================= -->
+                    <div class="tab-content hidden" id="tab-advanced-eda">
+                        <div class="section-title-box">
+                            <h2>Advanced Variable Profiling</h2>
+                            <p>Specialized analysis of temporal seasonality patterns, NLP word n-grams, multivariate anomalies, and bivariate charts.</p>
+                        </div>
+
+                        <!-- Sub Tab Nav links -->
+                        <div style="display:flex; border-bottom:1px solid var(--slate-800); margin-bottom: 25px; gap: 15px; padding-bottom: 10px;">
+                            <button class="chat-chip-btn active" id="subtab-btn-bivariate" style="border-radius:6px; font-weight:600; font-size:12.5px;">Bivariate Visualizer</button>
+                            <button class="chat-chip-btn" id="subtab-btn-datetime" style="border-radius:6px; font-weight:600; font-size:12.5px;">Datetime Seasonality</button>
+                            <button class="chat-chip-btn" id="subtab-btn-text" style="border-radius:6px; font-weight:600; font-size:12.5px;">NLP Text Profiling</button>
+                            <button class="chat-chip-btn" id="subtab-btn-outliers" style="border-radius:6px; font-weight:600; font-size:12.5px;">Multivariate Outliers</button>
+                        </div>
+
+                        <!-- SUB TAB: BIVARIATE -->
+                        <div class="sub-pane" id="pane-advanced-bivariate">
+                            <div class="card">
+                                <h3 class="card-title">AutoViz-style Bivariate Variables Analysis</h3>
+                                <p class="card-subtitle">Auto-configures distribution visualizations based on variable types (Num-Num, Cat-Num, or Cat-Cat).</p>
+                                <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                                    <div class="form-group">
+                                        <label for="bivariate-x-select">Select Variable X</label>
+                                        <select id="bivariate-x-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size:12.5px;"></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="bivariate-y-select">Select Variable Y</label>
+                                        <select id="bivariate-y-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size:12.5px;"></select>
+                                    </div>
+                                </div>
+                                <div class="heatmap-wrapper" style="height: 320px;" id="bivariate-chart-container">
+                                    <canvas id="bivariate-canvas-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SUB TAB: DATETIME -->
+                        <div class="sub-pane hidden" id="pane-advanced-datetime">
+                            <div id="no-datetime-alert" class="target-prompt-card">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                <h2>No Datetime columns detected</h2>
+                                <p>If your dataset contains dates, ensure they parse as datetime or use the Data Wrangler to cast them.</p>
+                            </div>
+                            
+                            <div id="datetime-panel-wrapper" class="hidden">
+                                <div class="card">
+                                    <h3 class="card-title">Select Temporal Feature</h3>
+                                    <select id="datetime-col-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12.5px; margin-top: 10px; width: 300px;"></select>
+                                </div>
+
+                                <div class="card" style="margin-top: 20px;">
+                                    <h3 class="card-title">Timeline Frequency Trend</h3>
+                                    <p class="card-subtitle" id="datetime-range-text">Min Date: -- | Max Date: -- | Range: -- days</p>
+                                    <div class="histogram-wrapper" style="height: 220px;" id="datetime-timeline-chart-container">
+                                        <canvas id="datetime-timeline-chart"></canvas>
+                                    </div>
+                                </div>
+
+                                <div class="stats-cards-grid" style="margin-top:20px; grid-template-columns: repeat(3, 1fr);">
+                                    <div class="card" style="margin-bottom:0;">
+                                        <h3 class="card-title" style="font-size:12.5px;">Hourly Seasonality</h3>
+                                        <div class="histogram-wrapper" style="height: 180px;" id="datetime-hourly-chart-container">
+                                            <canvas id="datetime-hourly-chart"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="card" style="margin-bottom:0;">
+                                        <h3 class="card-title" style="font-size:12.5px;">Weekly Seasonality</h3>
+                                        <div class="histogram-wrapper" style="height: 180px;" id="datetime-weekly-chart-container">
+                                            <canvas id="datetime-weekly-chart"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="card" style="margin-bottom:0;">
+                                        <h3 class="card-title" style="font-size:12.5px;">Monthly Seasonality</h3>
+                                        <div class="histogram-wrapper" style="height: 180px;" id="datetime-monthly-chart-container">
+                                            <canvas id="datetime-monthly-chart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SUB TAB: TEXT -->
+                        <div class="sub-pane hidden" id="pane-advanced-text">
+                            <div id="no-text-alert" class="target-prompt-card">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>
+                                <h2>No NLP/Text columns detected</h2>
+                                <p>NLP analysis triggers on text columns with high cardinality and average cell lengths &gt; 15 characters.</p>
+                            </div>
+
+                            <div id="text-panel-wrapper" class="hidden">
+                                <div class="card">
+                                    <h3 class="card-title">Select Text Variable</h3>
+                                    <select id="text-col-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12.5px; margin-top: 10px; width: 300px;"></select>
+                                </div>
+
+                                <div class="split-view" style="margin-top: 20px;">
+                                    <div class="card flex-1">
+                                        <h3 class="card-title">NLP Word Length & Word Count Stats</h3>
+                                        <div class="table-container">
+                                            <table class="simple-table">
+                                                <tbody id="text-stats-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="card flex-1" style="margin-bottom:0;">
+                                        <h3 class="card-title">Top 10 Token Unigrams</h3>
+                                        <div class="histogram-wrapper" style="height: 180px;" id="text-unigram-chart-container">
+                                            <canvas id="text-unigram-chart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card" style="margin-top:20px;">
+                                    <h3 class="card-title">Top 10 Phrase Bigrams</h3>
+                                    <div class="histogram-wrapper" style="height: 200px;" id="text-bigram-chart-container">
+                                        <canvas id="text-bigram-chart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SUB TAB: OUTLIERS -->
+                        <div class="sub-pane hidden" id="pane-advanced-outliers">
+                            <div id="no-outliers-alert" class="target-prompt-card">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                <h2>Outlier Diagnostics Bypassed</h2>
+                                <p>Multivariate outlier auditing requires at least 2 numerical features with non-zero variance.</p>
+                            </div>
+
+                            <div id="outliers-panel-wrapper" class="hidden">
+                                <div class="card">
+                                    <h3 class="card-title">Multi-Method Outlier Report Card</h3>
+                                    <p class="card-subtitle" id="outliers-contam-text">Compares anomalous observations across IQR (1.5 IQR bounds), Z-Score (>3.0), and Isolation Forest (5% contamination).</p>
+                                    
+                                    <div class="stats-cards-grid" style="margin-top: 15px; grid-template-columns: repeat(4, 1fr);">
+                                        <div class="mini-card" style="margin-bottom:0;">
+                                            <span class="card-label">Flagged by All 3</span>
+                                            <h3 id="outliers-all-three" class="text-danger">0</h3>
+                                        </div>
+                                        <div class="mini-card" style="margin-bottom:0;">
+                                            <span class="card-label">Flagged by any 2</span>
+                                            <h3 id="outliers-any-two" class="text-warning">0</h3>
+                                        </div>
+                                        <div class="mini-card" style="margin-bottom:0;">
+                                            <span class="card-label">Flagged by exactly 1</span>
+                                            <h3 id="outliers-exactly-one" class="text-info">0</h3>
+                                        </div>
+                                        <div class="mini-card" style="margin-bottom:0;">
+                                            <span class="card-label">Total Outlier Rows</span>
+                                            <h3 id="outliers-total-found">0</h3>
+                                        </div>
+                                    </div>
+
+                                    <h4 style="margin-top: 25px; margin-bottom: 10px; font-size:13px; font-weight:600;">Top Anomalous Records Intersection</h4>
+                                    <div class="table-container">
+                                        <table style="font-size:12px;">
+                                            <thead>
+                                                <tr>
+                                                    <th>Row Index</th>
+                                                    <th>Anomaly Intensity</th>
+                                                    <th>IQR Outlier?</th>
+                                                    <th>Z-Score Outlier?</th>
+                                                    <th>Isolation Forest?</th>
+                                                    <th>Flag Count</th>
+                                                    <th>Record Values Summary</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="outliers-tbody-list"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: DATA SHEET ================= -->
+                    <div class="tab-content hidden" id="tab-datasheet">
+                        <div class="section-title-box">
+                            <h2>Interactive Data Spreadsheet</h2>
+                            <p>Browse the dataset directly. Search values, click headers to sort, and paginate through records.</p>
+                        </div>
+
+                        <div class="card">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; gap: 15px;">
+                                <input type="text" id="sheet-search-input" placeholder="Search values across rows..." style="background-color: var(--slate-950); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px 15px; border-radius: 8px; font-size:13px; width: 350px; outline:none;">
+                                <div style="display:flex; align-items:center; gap: 10px;">
+                                    <span id="sheet-meta-info" class="text-muted" style="font-size:13px;">Showing 0 - 0 of 0</span>
+                                </div>
+                            </div>
+
+                            <div class="table-container" style="max-height: 480px; overflow: auto; border: 1px solid var(--slate-700); border-radius: 8px;">
+                                <table id="spreadsheet-table" style="font-size: 12.5px;">
+                                    <thead id="spreadsheet-thead"></thead>
+                                    <tbody id="spreadsheet-tbody"></tbody>
+                                </table>
+                            </div>
+
+                            <!-- Pagination Controls -->
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px;">
+                                <button class="btn btn-secondary btn-sm" id="sheet-prev-btn">Previous</button>
+                                <span id="sheet-page-indicator" style="font-size:13px; font-weight:500;">Page 1 of 1</span>
+                                <button class="btn btn-secondary btn-sm" id="sheet-next-btn">Next</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: SQL SANDBOX ================= -->
+                    <div class="tab-content hidden" id="tab-sql">
+                        <div class="section-title-box">
+                            <h2>In-Memory SQL Console</h2>
+                            <p>Query the parsed dataset directly using standard SQLite syntax. The table name is registered as <span class="code">data</span>.</p>
+                        </div>
+
+                        <div class="sql-interface">
+                            <!-- Textarea console -->
+                            <div class="sql-input-card card">
+                                <div class="console-header">
+                                    <span class="dot-btn green"></span>
+                                    <span class="dot-btn yellow"></span>
+                                    <span class="dot-btn red"></span>
+                                    <span class="console-title">SQL Terminal</span>
+                                </div>
+                                <textarea id="sql-query-input" placeholder="SELECT * FROM data LIMIT 10;"></textarea>
+                                <div class="console-actions">
+                                    <span id="query-meta-info" class="text-muted">Rows fetched: 0 &bull; Speed: 0ms</span>
+                                    <button class="btn btn-primary btn-sm" id="run-query-btn">Execute Run</button>
+                                </div>
+                            </div>
+
+                            <!-- Tabular SQL Results -->
+                            <div class="sql-results-card card">
+                                <h3 class="card-title">Console Output</h3>
+                                <div id="sql-error-output" class="console-error hidden"></div>
+                                <div class="table-container" id="sql-table-container">
+                                    <table id="sql-results-table">
+                                        <thead id="sql-results-thead"></thead>
+                                        <tbody id="sql-results-tbody">
+                                            <tr>
+                                                <td style="text-align: center; color: var(--slate-400); padding: 40px;">Execute a SQL query to display matching dataset records.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: LLM CHAT ================= -->
+                    <div class="tab-content hidden" id="tab-chat">
+                        <div class="chat-container">
+                            <div class="chat-header">
+                                <h3>AuraEDA Copilot</h3>
+                                <p>Ask about structural alerts, outlier thresholds, distribution shapes, or query pipelines.</p>
+                            </div>
+                            
+                            <!-- Chat log scroll area -->
+                            <div class="chat-messages" id="chat-messages-area">
+                                <div class="msg msg-system">
+                                    <p>Welcome to AuraEDA Chat! I am your context-aware data advisor. Ask me questions about skewness, anomalies, multicollinearity, or standard feature engineering techniques for this dataset.</p>
+                                </div>
+                            </div>
+
+                            <!-- Chat Quick chips -->
+                            <div class="chat-chips">
+                                <button class="chat-chip-btn">What are the key alerts in this data?</button>
+                                <button class="chat-chip-btn">How should I impute missing cells?</button>
+                                <button class="chat-chip-btn">Write a cleaning python script</button>
+                            </div>
+
+                            <!-- Chat Input footer -->
+                            <div class="chat-input-bar">
+                                <input type="text" id="chat-user-input" placeholder="Ask details about alerts, distributions or transformations...">
+                                <button id="chat-send-btn" class="btn btn-primary">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+        <!-- Settings Gear Modal Overlay -->
+        <div id="settings-modal" class="overlay hidden" style="z-index: 200;">
+            <div class="card" style="width: 100%; max-width: 450px; background-color: var(--slate-900); border-color: var(--slate-700); border-radius: 16px; backdrop-filter: blur(16px); position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                <button id="settings-close-btn" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: var(--slate-400); cursor: pointer; font-size: 20px;">&times;</button>
+                <h3 style="font-family: var(--font-display); font-size: 18px; margin-bottom: 5px; color: #fff;">Feature Flags & Settings</h3>
+                <p style="font-size: 12px; color: var(--slate-400); margin-bottom: 12px;">Toggle experimental backend algorithmic execution steps.</p>
+                <div style="font-size: 11px; padding: 8px 12px; background-color: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.15); border-radius: 8px; color: var(--cyan-400); margin-bottom: 20px; font-weight:500; text-align: left;">
+                     ℹ️ Changes take effect immediately on the next action. No server restart required.
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 15px; text-align: left;" id="feature-flags-container">
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--slate-800); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 13px; display: block; color: #fff;">SMOTE Balancing</strong>
+                            <span style="font-size: 11px; color: var(--slate-400);">Oversample minority class for pipeline metrics</span>
+                        </div>
+                        <input type="checkbox" id="flag-smote" class="feature-flag-checkbox">
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--slate-800); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 13px; display: block; color: #fff;">Little's MCAR Test</strong>
+                            <span style="font-size: 11px; color: var(--slate-400);">Run missing completely at random diagnostic</span>
+                        </div>
+                        <input type="checkbox" id="flag-mcar_test" class="feature-flag-checkbox">
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--slate-800); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 13px; display: block; color: #fff;">Language Detection</strong>
+                            <span style="font-size: 11px; color: var(--slate-400);">Identify textual column language distributions</span>
+                        </div>
+                        <input type="checkbox" id="flag-language_detection" class="feature-flag-checkbox">
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--slate-800); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 13px; display: block; color: #fff;">ANOVA Interactions</strong>
+                            <span style="font-size: 11px; color: var(--slate-400);">Assess two-way F-test interaction effects</span>
+                        </div>
+                        <input type="checkbox" id="flag-interaction_effects" class="feature-flag-checkbox">
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--slate-800); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 13px; display: block; color: #fff;">Partial Correlation</strong>
+                            <span style="font-size: 11px; color: var(--slate-400);">Filter multicollinearity with residual-based correlation</span>
+                        </div>
+                        <input type="checkbox" id="flag-partial_correlation" class="feature-flag-checkbox">
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--slate-800); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 13px; display: block; color: #fff;">TF-IDF NLP Exporter</strong>
+                            <span style="font-size: 11px; color: var(--slate-400);">Vectorize text variables inside pipelines</span>
+                        </div>
+                        <input type="checkbox" id="flag-tfidf_nlp" class="feature-flag-checkbox">
+                    </div>
+                </div>
+                
+                <div style="display: flex; justify-content: flex-end; margin-top: 25px; gap: 10px;">
+                    <button class="btn btn-secondary btn-sm" id="settings-cancel-btn">Cancel</button>
+                    <button class="btn btn-primary btn-sm" id="settings-save-btn">Save Settings</button>
+                </div>
+        </div>
+
+        <!-- Floating Help Icon / Shortcuts Overlay -->
+        <div class="help-floating-container" id="help-floating-container">
+            <button class="help-btn" id="help-btn" title="Keyboard Shortcuts">?</button>
+            <div class="help-tooltip hidden" id="help-tooltip">
+                <div class="help-tooltip-header">Keyboard Shortcuts</div>
+                <ul class="shortcuts-list">
+                    <li><kbd>/</kbd> Focus Copilot</li>
+                    <li><kbd>Ctrl</kbd> + <kbd>Z</kbd> Undo</li>
+                    <li><kbd>Ctrl</kbd> + <kbd>Y</kbd> Redo</li>
+                    <li><kbd>Ctrl</kbd> + <kbd>K</kbd> Global Search</li>
+                </ul>
+            </div>
+        </div>
+
+    <!-- Script Entry Point -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
