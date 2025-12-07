@@ -41,6 +41,7 @@ app.add_middleware(
 # Global in-memory dataset state for multi-dataset workspaces
 DATASETS: Dict[str, Dict[str, Any]] = {}
 ACTIVE_DATASET_ID: Optional[str] = None
+CURRENT_DF: Optional[pd.DataFrame] = None
 
 def update_dataset_views(ds_id: str):
     global DATASETS
@@ -1727,6 +1728,239 @@ async def export_html(target_column: Optional[str] = None, x_dataset_id: Optiona
         return Response(content=html_content, media_type="text/html", headers=headers)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"HTML report generation failed: {str(e)}")
+
+class HypothesisRequest(BaseModel):
+    test_type: str
+    col1: str
+    col2: Optional[str] = None
+    pop_mean: float = 0.0
+    alpha: float = 0.05
+
+@app.get("/api/features/distribution-details")
+async def get_distribution_details(column_name: str, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    if column_name not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{column_name}' not found.")
+        
+    series = df[column_name]
+    non_null_series = series.dropna()
+    
+    if len(non_null_series) == 0:
+        return {"type": "empty", "message": "Column has no non-null values."}
+        
+    is_numeric = pd.api.types.is_numeric_dtype(series)
+    
+    if is_numeric:
+        # Sample and sort for ECDF & Q-Q plots
+        sampled = non_null_series.sample(min(2000, len(non_null_series)), random_state=42).sort_values()
+        n_samples = len(sampled)
+        
+        import scipy.stats as stats
+        q_vals = (np.arange(1, n_samples + 1) - 0.5) / n_samples
+        theoretical_quantiles = stats.norm.ppf(q_vals).tolist()
+        actual_values = sampled.tolist()
+        
+        # Calculate percentiles
+        quantiles = {
+            "q25": float(np.percentile(non_null_series, 25)),
+            "q50": float(np.percentile(non_null_series, 50)),
+            "q75": float(np.percentile(non_null_series, 75)),
+            "q95": float(np.percentile(non_null_series, 95))
+        }
+        
+        # Calculate histogram and KDE
+        counts, bin_edges = np.histogram(non_null_series, bins=20)
+        bin_labels = []
+        for i in range(len(bin_edges) - 1):
+            bin_labels.append(float((bin_edges[i] + bin_edges[i+1]) / 2))
+            
+        # KDE estimate
+        try:
+            kde_func = stats.gaussian_kde(non_null_series)
+            kde_x = np.linspace(float(non_null_series.min()), float(non_null_series.max()), 100)
+            kde_y = [float(val) for val in kde_func(kde_x)]
+            kde_data = {"x": kde_x.tolist(), "y": kde_y}
+        except Exception:
+            kde_data = {"x": [], "y": []}
+            
+        return {
+            "type": "numerical",
+            "values": actual_values,
+            "theoretical_quantiles": theoretical_quantiles,
+            "quantiles": quantiles,
+            "histogram": {
+                "bin_centers": bin_labels,
+                "counts": counts.tolist(),
+                "bin_edges": bin_edges.tolist()
+            },
+            "kde": kde_data
+        }
+    else:
+        # Categorical
+        val_counts = non_null_series.value_counts()
+        max_cats = 15
+        if len(val_counts) > max_cats:
+            top_cats = val_counts.iloc[:max_cats]
+            other_sum = val_counts.iloc[max_cats:].sum()
+            labels = [str(x) for x in top_cats.index] + ["Other"]
+            counts = [int(x) for x in top_cats.values] + [int(other_sum)]
+        else:
+            labels = [str(x) for x in val_counts.index]
+            counts = [int(x) for x in val_counts.values]
+            
+        return {
+            "type": "categorical",
+            "labels": labels,
+            "counts": counts
+        }
+
+@app.get("/api/bivariate")
+async def get_bivariate(x_col: str, y_col: str, z_col: Optional[str] = None, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    if x_col not in df.columns or y_col not in df.columns:
+        raise HTTPException(status_code=400, detail="Columns not found in dataset.")
+        
+    cols = [x_col, y_col]
+    if z_col:
+        cols.append(z_col)
+        
+    clean_df = df[cols].dropna()
+    if len(clean_df) == 0:
+        return {"type": "empty", "message": "No overlapping non-null rows."}
+        
+    is_num_x = pd.api.types.is_numeric_dtype(df[x_col])
+    is_num_y = pd.api.types.is_numeric_dtype(df[y_col])
+    
+    if is_num_x and is_num_y:
+        x_vals = clean_df[x_col].values
+        y_vals = clean_df[y_col].values
+        
+        import scipy.stats as stats
+        try:
+            r_val, p_val = stats.pearsonr(x_vals, y_vals)
+            r_val = float(r_val) if not np.isnan(r_val) else 0.0
+            p_val = float(p_val) if not np.isnan(p_val) else 1.0
+        except Exception:
+            r_val, p_val = 0.0, 1.0
+            
+        # Fit regression
+        try:
+            lr = LinearRegression()
+            lr.fit(x_vals.reshape(-1, 1), y_vals)
+            slope = float(lr.coef_[0])
+            intercept = float(lr.intercept_)
+            r2 = float(lr.score(x_vals.reshape(-1, 1), y_vals))
+        except Exception:
+            slope, intercept, r2 = 0.0, 0.0, 0.0
+            
+        # Sample for plotting
+        sample_size = min(2000, len(clean_df))
+        sample_df = clean_df.sample(n=sample_size, random_state=42)
+        x_sample = sample_df[x_col].values.tolist()
+        y_sample = sample_df[y_col].values.tolist()
+        
+        if z_col and pd.api.types.is_numeric_dtype(df[z_col]):
+            z_sample = sample_df[z_col].values.tolist()
+            return {
+                "type": "num-num-num",
+                "x": x_sample,
+                "y": y_sample,
+                "z": z_sample,
+                "r": r_val,
+                "p_value": p_val
+            }
+            
+        return {
+            "type": "num-num",
+            "x": x_sample,
+            "y": y_sample,
+            "r": r_val,
+            "p_value": p_val,
+            "r2": r2,
+            "slope": slope,
+            "intercept": intercept
+        }
+        
+    elif is_num_x and not is_num_y:
+        # Num-Cat
+        grouped = {}
+        for cat in clean_df[y_col].unique():
+            vals = clean_df[clean_df[y_col] == cat][x_col].values
+            grouped[str(cat)] = vals[:1000].tolist()
+        return {
+            "type": "num-cat",
+            "x_name": x_col,
+            "y_name": y_col,
+            "groups": grouped
+        }
+        
+    elif not is_num_x and is_num_y:
+        # Cat-Num
+        grouped = {}
+        for cat in clean_df[x_col].unique():
+            vals = clean_df[clean_df[x_col] == cat][y_col].values
+            grouped[str(cat)] = vals[:1000].tolist()
+        return {
+            "type": "cat-num",
+            "x_name": x_col,
+            "y_name": y_col,
+            "groups": grouped
+        }
+        
+    else:
+        # Cat-Cat
+        contingency_tab = pd.crosstab(clean_df[x_col], clean_df[y_col])
+        import scipy.stats as stats
+        try:
+            chi2, p_val, dof, expected = stats.chi2_contingency(contingency_tab)
+            chi2, p_val, dof = float(chi2), float(p_val), int(dof)
+        except Exception:
+            chi2, p_val, dof = 0.0, 1.0, 0
+            
+        return {
+            "type": "cat-cat",
+            "x_name": x_col,
+            "y_name": y_col,
+            "x_labels": contingency_tab.index.tolist(),
+            "y_labels": contingency_tab.columns.tolist(),
+            "z_values": contingency_tab.values.tolist(),
+            "chi2": chi2,
+            "p_value": p_val,
+            "dof": dof
+        }
+
+@app.post("/api/hypothesis/run")
+async def run_hypothesis_test(request: HypothesisRequest, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.hypothesis import HypothesisModule
+    module = HypothesisModule()
+    res = module.run_test(
+        df=df,
+        test_type=request.test_type,
+        col1=request.col1,
+        col2=request.col2,
+        pop_mean=request.pop_mean,
+        alpha=request.alpha
+    )
+    return res
 
 os.makedirs("frontend", exist_ok=True)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")

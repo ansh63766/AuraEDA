@@ -6,6 +6,7 @@
         datasetInfo: null,       // upload metadata (filename, columns, n_rows, n_columns, dtypes)
         analysisResults: null,   // full stats + LLM comments
         activeFeature: null,     // selected Explorer column
+        selectedFeatureChartType: 'kde-hist', // chart type selected for explorer
         charts: {},              // Chart.js instances
         chatHistory: [],         // conversation log
         wranglerSteps: [],       // wrangle steps queue
@@ -279,7 +280,34 @@
         settingsModal: document.getElementById('settings-modal'),
         settingsCloseBtn: document.getElementById('settings-close-btn'),
         settingsCancelBtn: document.getElementById('settings-cancel-btn'),
-        settingsSaveBtn: document.getElementById('settings-save-btn')
+        settingsSaveBtn: document.getElementById('settings-save-btn'),
+        
+        // Phase 3 elements
+        featureChartTypeSelect: document.getElementById('feature-chart-type-select'),
+        featurePlotlyChart: document.getElementById('feature-detail-plotly-chart'),
+        correlationMethodSelect: document.getElementById('correlation-method-select'),
+        chkFilterSignificance: document.getElementById('chk-filter-significance'),
+        correlationPlotlyHeatmap: document.getElementById('correlation-plotly-heatmap'),
+        bivariateZSelect: document.getElementById('bivariate-z-select'),
+        bivariatePlotlyChart: document.getElementById('bivariate-plotly-chart'),
+        hypTestType: document.getElementById('hyp-test-type'),
+        hypCol1: document.getElementById('hyp-col1'),
+        hypCol1Label: document.getElementById('hyp-col1-label'),
+        hypCol1Group: document.getElementById('hyp-col1-group'),
+        hypCol2: document.getElementById('hyp-col2'),
+        hypCol2Label: document.getElementById('hyp-col2-label'),
+        hypCol2Group: document.getElementById('hyp-col2-group'),
+        hypPopMean: document.getElementById('hyp-popmean'),
+        hypPopMeanGroup: document.getElementById('hyp-popmean-group'),
+        hypConfidence: document.getElementById('hyp-confidence'),
+        btnRunHypTest: document.getElementById('btn-run-hyp-test'),
+        hypResultsEmpty: document.getElementById('hyp-results-empty'),
+        hypResultsContent: document.getElementById('hyp-results-content'),
+        hypResStat: document.getElementById('hyp-res-stat'),
+        hypResPvalue: document.getElementById('hyp-res-pvalue'),
+        hypResInterpretation: document.getElementById('hyp-res-interpretation'),
+        hypResPower: document.getElementById('hyp-res-power'),
+        hypPlotlyChart: document.getElementById('hyp-plotly-chart')
     };
 
     // Initialize Event Listeners
@@ -623,9 +651,38 @@
                 if (state.datasetInfo) {
                     e.preventDefault();
                     triggerRedo();
-                }
             }
         });
+
+        // Phase 3 Event Listeners
+        if (el.featureChartTypeSelect) {
+            el.featureChartTypeSelect.addEventListener('change', () => {
+                state.selectedFeatureChartType = el.featureChartTypeSelect.value;
+                if (state.activeFeature) {
+                    // Re-render chart for the active feature
+                    const results = state.analysisResults;
+                    const detail = results.results.distributions.features[state.activeFeature];
+                    if (detail) {
+                        drawFeatureDistributionChart(state.activeFeature, detail);
+                    }
+                }
+            });
+        }
+        if (el.correlationMethodSelect) {
+            el.correlationMethodSelect.addEventListener('change', drawPearsonHeatmap);
+        }
+        if (el.chkFilterSignificance) {
+            el.chkFilterSignificance.addEventListener('change', drawPearsonHeatmap);
+        }
+        if (el.bivariateZSelect) {
+            el.bivariateZSelect.addEventListener('change', renderBivariateChart);
+        }
+        if (el.hypTestType) {
+            el.hypTestType.addEventListener('change', updateHypothesisFields);
+        }
+        if (el.btnRunHypTest) {
+            el.btnRunHypTest.addEventListener('click', runHypothesisTestInCenter);
+        }
     }
 
     // Helper functions
@@ -651,6 +708,8 @@
             loadSpreadsheetData();
         } else if (tabName === 'benfords') {
             drawBenfordPlot();
+        } else if (tabName === 'hypothesis') {
+            updateHypothesisFields();
         }
     }
 
@@ -1032,6 +1091,7 @@
             el.wrangleColSelect.innerHTML = '';
             el.bivariateXSelect.innerHTML = '';
             el.bivariateYSelect.innerHTML = '';
+            el.bivariateZSelect.innerHTML = '<option value="">-- None (2D Plot) --</option>';
             el.datetimeColSelect.innerHTML = '';
             el.textColSelect.innerHTML = '';
 
@@ -1044,7 +1104,10 @@
                 el.wrangleColSelect.appendChild(opt.cloneNode(true));
                 el.bivariateXSelect.appendChild(opt.cloneNode(true));
                 el.bivariateYSelect.appendChild(opt.cloneNode(true));
+                el.bivariateZSelect.appendChild(opt.cloneNode(true));
             });
+            
+            updateHypothesisFields();
             
             // Restore target variable value if selected
             if (data.results && data.results.importance && data.results.importance.target_column) {
@@ -1367,20 +1430,104 @@
         renderPearsonCanvasHeatmap(canvas, cols, matrix);
     }
 
-    // Pearson Correlation Heatmap rendering via canvas
+    // Pearson/Spearman/Kendall/Phik Correlation Heatmap rendering via Plotly
     function drawPearsonHeatmap() {
-        const container = el.correlationHeatmapContainer;
-        container.innerHTML = '<canvas id="pearson-heatmap-canvas" width="340" height="280"></canvas>';
-        const canvas = document.getElementById('pearson-heatmap-canvas');
         const results = state.analysisResults;
-        const corrData = results.results.correlations.numeric_correlation;
-
-        if (!corrData || !corrData.columns || corrData.columns.length === 0) {
-            container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--slate-400);">Insufficient numeric variables.</div>';
+        if (!results || !results.results || !results.results.correlations) {
+            el.correlationPlotlyHeatmap.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--slate-400);">No correlation data available.</div>';
             return;
         }
 
-        renderPearsonCanvasHeatmap(canvas, corrData.columns, corrData.matrix);
+        const method = el.correlationMethodSelect ? el.correlationMethodSelect.value : 'pearson';
+        const filterSignificance = el.chkFilterSignificance ? el.chkFilterSignificance.checked : false;
+
+        let corrData;
+        if (method === 'spearman') {
+            corrData = results.results.correlations.spearman_correlation;
+        } else if (method === 'kendall') {
+            corrData = results.results.correlations.kendall_correlation;
+        } else if (method === 'phik') {
+            corrData = results.results.correlations.phik_correlation;
+        } else {
+            corrData = results.results.correlations.numeric_correlation;
+        }
+
+        if (!corrData || !corrData.columns || corrData.columns.length === 0) {
+            el.correlationPlotlyHeatmap.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--slate-400);">No numeric variables or insufficient correlation data.</div>';
+            return;
+        }
+
+        const cols = corrData.columns;
+        let matrix = JSON.parse(JSON.stringify(corrData.matrix)); // Deep clone matrix
+        const pValues = corrData.p_values;
+
+        // Apply significance filter client-side
+        if (filterSignificance && pValues) {
+            for (let i = 0; i < matrix.length; i++) {
+                for (let j = 0; j < matrix[i].length; j++) {
+                    if (i !== j && pValues[i][j] >= 0.05) {
+                        matrix[i][j] = null; // Mask non-significant correlations
+                    }
+                }
+            }
+        }
+
+        // Format custom hover text
+        const hoverText = [];
+        for (let i = 0; i < matrix.length; i++) {
+            hoverText[i] = [];
+            for (let j = 0; j < matrix[i].length; j++) {
+                const val = matrix[i][j];
+                const pVal = pValues ? pValues[i][j] : null;
+                const formattedP = pVal !== null ? (pVal < 0.001 ? pVal.toExponential(3) : pVal.toFixed(4)) : 'N/A';
+                if (val === null) {
+                    hoverText[i][j] = `${cols[i]} vs ${cols[j]}<br>Correlation: Masked (p ≥ 0.05)<br>p-value: ${formattedP}`;
+                } else {
+                    hoverText[i][j] = `${cols[i]} vs ${cols[j]}<br>Correlation: ${val.toFixed(3)}<br>p-value: ${formattedP}`;
+                }
+            }
+        }
+
+        // Draw heat cells using Plotly Heatmap
+        const trace = {
+            z: matrix,
+            x: cols,
+            y: cols,
+            type: 'heatmap',
+            colorscale: [
+                [0.0, '#f43f5e'],   // Rose negative
+                [0.5, '#0f172a'],   // Slate background at 0 correlation
+                [1.0, '#06b6d4']    // Cyan positive
+            ],
+            zmin: -1,
+            zmax: 1,
+            text: hoverText,
+            hoverinfo: 'text',
+            showscale: true,
+            colorbar: {
+                tickfont: { color: '#94a3b8' },
+                thickness: 15,
+                len: 0.8
+            }
+        };
+
+        const layout = {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            margin: { t: 10, b: 60, l: 80, r: 10 },
+            xaxis: {
+                tickangle: -45,
+                tickfont: { color: '#94a3b8', size: 9 },
+                gridcolor: 'rgba(255,255,255,0.02)'
+            },
+            yaxis: {
+                tickfont: { color: '#94a3b8', size: 9 },
+                gridcolor: 'rgba(255,255,255,0.02)',
+                autorange: 'reversed'
+            }
+        };
+
+        Plotly.newPlot(el.correlationPlotlyHeatmap, [trace], layout, { responsive: true, displayModeBar: false });
     }
 
     function renderPearsonCanvasHeatmap(canvas, labels, matrix) {
@@ -1537,59 +1684,217 @@
 
     function drawFeatureDistributionChart(col, detail) {
         destroyChart('featureDist');
-        const ctx = el.featureDistributionChart.getContext('2d');
-        const hist = detail.histogram;
-
+        
+        state.activeFeature = col;
+        
+        // Show/hide selector
         if (detail.type === 'numerical') {
-            state.charts.featureDist = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: hist.labels.map(l => l.toFixed(1)),
-                    datasets: [{
-                        label: 'Frequency',
-                        data: hist.counts,
-                        backgroundColor: 'rgba(6, 182, 212, 0.4)',
-                        borderColor: '#06b6d4',
-                        borderWidth: 1.5,
-                        barPercentage: 1.0,
-                        categoryPercentage: 1.0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
-                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } }
-                    }
-                }
-            });
+            el.featureChartTypeSelect.classList.remove('hidden');
         } else {
-            // Categorical bar chart
-            state.charts.featureDist = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: hist.labels,
-                    datasets: [{
-                        label: 'Value count',
-                        data: hist.counts,
-                        backgroundColor: 'rgba(99, 102, 241, 0.5)',
-                        borderColor: '#6366f1',
-                        borderWidth: 1.5
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { color: '#94a3b8' } },
-                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } }
-                    }
-                }
-            });
+            el.featureChartTypeSelect.classList.add('hidden');
         }
+
+        // Show spinner / loading inside the chart wrapper
+        el.featurePlotlyChart.innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Loading interactive chart...</div>';
+
+        if (detail.type !== 'numerical') {
+            // Categorical: simple bar chart of counts
+            fetch(`/api/features/distribution-details?column_name=${encodeURIComponent(col)}`, {
+                headers: { 'X-Dataset-Id': state.activeDatasetId }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.type === 'categorical') {
+                    const trace = {
+                        x: data.labels,
+                        y: data.counts,
+                        type: 'bar',
+                        marker: {
+                            color: 'rgba(99, 102, 241, 0.6)',
+                            line: { color: '#6366f1', width: 1.5 }
+                        }
+                    };
+                    const layout = {
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        plot_bgcolor: 'rgba(0,0,0,0)',
+                        margin: { t: 20, b: 40, l: 50, r: 20 },
+                        xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' },
+                        yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' }
+                    };
+                    Plotly.newPlot(el.featurePlotlyChart, [trace], layout, { responsive: true, displayModeBar: false });
+                }
+            })
+            .catch(err => {
+                el.featurePlotlyChart.innerHTML = `<div class="text-danger" style="padding:20px;">Error rendering chart: ${err.message}</div>`;
+            });
+            return;
+        }
+
+        // Numerical: fetch details and plot selected type
+        fetch(`/api/features/distribution-details?column_name=${encodeURIComponent(col)}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.type !== 'numerical') return;
+
+            const chartType = state.selectedFeatureChartType;
+            let traces = [];
+            let layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { t: 20, b: 40, l: 50, r: 20 },
+                xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)', title: { text: col, font: { color: '#94a3b8', size: 11 } } },
+                yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' }
+            };
+
+            if (chartType === 'kde-hist') {
+                // KDE + Histogram
+                traces.push({
+                    x: data.values,
+                    type: 'histogram',
+                    name: 'Histogram',
+                    histnorm: 'probability density',
+                    nbinsx: 20,
+                    marker: {
+                        color: 'rgba(6, 182, 212, 0.4)',
+                        line: { color: '#06b6d4', width: 1.2 }
+                    }
+                });
+
+                if (data.kde && data.kde.x && data.kde.x.length > 0) {
+                    traces.push({
+                        x: data.kde.x,
+                        y: data.kde.y,
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'KDE Density',
+                        line: { color: '#ef4444', width: 2 }
+                    });
+                }
+                layout.showlegend = false;
+                
+            } else if (chartType === 'box') {
+                traces.push({
+                    y: data.values,
+                    type: 'box',
+                    name: col,
+                    marker: { color: '#06b6d4' },
+                    boxpoints: 'outliers'
+                });
+                layout.xaxis = { showticklabels: false };
+                
+            } else if (chartType === 'violin') {
+                traces.push({
+                    y: data.values,
+                    type: 'violin',
+                    name: col,
+                    points: 'none',
+                    box: { visible: true },
+                    line: { color: '#8b5cf6' },
+                    meanline: { visible: true }
+                });
+                layout.xaxis = { showticklabels: false };
+                
+            } else if (chartType === 'ecdf') {
+                const n = data.values.length;
+                const ecdf_y = data.values.map((_, idx) => (idx + 1) / n);
+                traces.push({
+                    x: data.values,
+                    y: ecdf_y,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'ECDF',
+                    line: { color: '#10b981', width: 2 }
+                });
+
+                const qColors = {
+                    "q25": "rgba(245, 158, 11, 0.7)",
+                    "q50": "rgba(16, 185, 129, 0.7)",
+                    "q75": "rgba(99, 102, 241, 0.7)",
+                    "q95": "rgba(239, 68, 68, 0.7)"
+                };
+                const shapes = [];
+                const annotations = [];
+                
+                Object.keys(data.quantiles).forEach(qKey => {
+                    const xVal = data.quantiles[qKey];
+                    const yVal = qKey === "q25" ? 0.25 : (qKey === "q50" ? 0.50 : (qKey === "q75" ? 0.75 : 0.95));
+                    
+                    shapes.push({
+                        type: 'line',
+                        x0: xVal,
+                        y0: 0,
+                        x1: xVal,
+                        y1: yVal,
+                        line: {
+                            color: qColors[qKey],
+                            width: 1.5,
+                            dash: 'dash'
+                        }
+                    });
+                    
+                    annotations.push({
+                        x: xVal,
+                        y: yVal,
+                        text: `${qKey.toUpperCase()}: ${xVal.toFixed(2)}`,
+                        showarrow: true,
+                        arrowhead: 2,
+                        arrowcolor: qColors[qKey],
+                        ax: 30,
+                        ay: -15,
+                        font: { color: '#fff', size: 9 },
+                        bordercolor: qColors[qKey],
+                        borderwidth: 1,
+                        borderpad: 2,
+                        bgcolor: 'rgba(15, 23, 42, 0.85)'
+                    });
+                });
+                
+                layout.shapes = shapes;
+                layout.annotations = annotations;
+                layout.yaxis.title = { text: 'Cumulative Probability', font: { color: '#94a3b8', size: 11 } };
+                
+            } else if (chartType === 'qq') {
+                traces.push({
+                    x: data.theoretical_quantiles,
+                    y: data.values,
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: 'Data Points',
+                    marker: { color: '#f43f5e', size: 5 }
+                });
+
+                const q25_x = -0.6744897501960817;
+                const q75_x = 0.6744897501960817;
+                const q25_y = data.quantiles.q25;
+                const q75_y = data.quantiles.q75;
+                
+                const slope = (q75_y - q25_y) / (q75_x - q25_x);
+                const intercept = q25_y - slope * q25_x;
+                
+                const min_x = Math.min(...data.theoretical_quantiles);
+                const max_x = Math.max(...data.theoretical_quantiles);
+                
+                traces.push({
+                    x: [min_x, max_x],
+                    y: [slope * min_x + intercept, slope * max_x + intercept],
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: 'Reference',
+                    line: { color: '#ffffff', width: 1.5 }
+                });
+                
+                layout.xaxis.title = { text: 'Theoretical Normal Quantiles', font: { color: '#94a3b8', size: 11 } };
+                layout.yaxis.title = { text: 'Sample Quantiles', font: { color: '#94a3b8', size: 11 } };
+                layout.showlegend = false;
+            }
+
+            Plotly.newPlot(el.featurePlotlyChart, traces, layout, { responsive: true, displayModeBar: false });
+        })
+        .catch(err => {
+            el.featurePlotlyChart.innerHTML = `<div class="text-danger" style="padding:20px;">Error rendering chart: ${err.message}</div>`;
+        });
     }
 
     // Target Specific Charts: Drift Sensitivity
@@ -2232,60 +2537,128 @@
         }
     }
 
-    // Custom Bivariate visualizer (Scatter/Box/Stacked bars)
+    // Custom Bivariate visualizer (Scatter/Box/Stacked bars) using Plotly
     function renderBivariateChart() {
         destroyChart('bivariate');
         const x = el.bivariateXSelect.value;
         const y = el.bivariateYSelect.value;
+        const z = el.bivariateZSelect ? el.bivariateZSelect.value : '';
         const results = state.analysisResults;
 
         if (!results || !x || !y) return;
 
-        el.bivariateCanvasChart.innerHTML = '<canvas id="bivariate-canvas" height="320"></canvas>';
-        const ctx = document.getElementById('bivariate-canvas').getContext('2d');
+        const targetDiv = document.getElementById('bivariate-plotly-chart');
+        if (!targetDiv) return;
+        targetDiv.innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Loading bivariate chart...</div>';
 
-        // Draw scatter, regression, or grouped charts based on numerical/categorical
-        const isNumX = results.results.distributions.features[x]?.type === 'numerical';
-        const isNumY = results.results.distributions.features[y]?.type === 'numerical';
-
-        if (isNumX && isNumY) {
-            // Draw numerical scatter plot
-            state.charts.bivariate = new Chart(ctx, {
-                type: 'scatter',
-                data: {
-                    datasets: [{
-                        label: `${y} vs ${x}`,
-                        data: Array.from({ length: 50 }, () => ({ x: Math.random() * 100, y: Math.random() * 100 })),
-                        backgroundColor: '#06b6d4'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: { title: { display: true, text: x, color: '#fff' } },
-                        y: { title: { display: true, text: y, color: '#fff' } }
-                    }
-                }
-            });
-        } else {
-            // Grouped Bar chart
-            state.charts.bivariate = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Cat A', 'Cat B', 'Cat C'],
-                    datasets: [{
-                        label: 'Mean Y value',
-                        data: [40, 60, 30],
-                        backgroundColor: '#6366f1'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false
-                }
-            });
+        let url = `/api/bivariate?x_col=${encodeURIComponent(x)}&y_col=${encodeURIComponent(y)}`;
+        if (z) {
+            url += `&z_col=${encodeURIComponent(z)}`;
         }
+
+        fetch(url, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.type === 'empty') {
+                targetDiv.innerHTML = `<div style="text-align:center; color:var(--slate-400); padding:40px;">${data.message}</div>`;
+                return;
+            }
+
+            let traces = [];
+            let layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { t: 35, b: 50, l: 60, r: 20 },
+                xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)', title: { text: x, font: { color: '#94a3b8' } } },
+                yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)', title: { text: y, font: { color: '#94a3b8' } } }
+            };
+
+            if (data.type === 'num-num') {
+                // Scatter + Regression Line
+                traces.push({
+                    x: data.x,
+                    y: data.y,
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: 'Observations',
+                    marker: { color: 'rgba(6, 182, 212, 0.6)', size: 6 }
+                });
+
+                const minX = Math.min(...data.x);
+                const maxX = Math.max(...data.x);
+                const minY = data.slope * minX + data.intercept;
+                const maxY = data.slope * maxX + data.intercept;
+
+                traces.push({
+                    x: [minX, maxX],
+                    y: [minY, maxY],
+                    mode: 'lines',
+                    type: 'scatter',
+                    name: `Regression (R² = ${data.r2.toFixed(3)})`,
+                    line: { color: '#ef4444', width: 2 }
+                });
+                
+            } else if (data.type === 'num-num-num') {
+                // 3D Scatter
+                traces.push({
+                    x: data.x,
+                    y: data.y,
+                    z: data.z,
+                    mode: 'markers',
+                    type: 'scatter3d',
+                    marker: {
+                        color: data.z,
+                        colorscale: 'Viridis',
+                        size: 4,
+                        opacity: 0.8
+                    }
+                });
+                layout = {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 0, b: 0, l: 0, r: 0 },
+                    scene: {
+                        xaxis: { title: x, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.1)' },
+                        yaxis: { title: y, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.1)' },
+                        zaxis: { title: z, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.1)' }
+                    }
+                };
+                
+            } else if (data.type === 'cat-num' || data.type === 'num-cat') {
+                // Grouped Box plot
+                const groups = data.groups;
+                Object.keys(groups).forEach(cat => {
+                    traces.push({
+                        y: groups[cat],
+                        type: 'box',
+                        name: cat,
+                        boxpoints: 'outliers'
+                    });
+                });
+                layout.showlegend = false;
+                
+            } else if (data.type === 'cat-cat') {
+                // Contingency Table Heatmap
+                traces.push({
+                    z: data.z_values,
+                    x: data.y_labels,
+                    y: data.x_labels,
+                    type: 'heatmap',
+                    colorscale: 'Purples',
+                    showscale: true
+                });
+                layout.title = {
+                    text: `Chi² Test: χ² = ${data.chi2.toFixed(2)}, p = ${data.p_value.toFixed(4)}`,
+                    font: { color: '#cbd5e1', size: 12 }
+                };
+            }
+
+            Plotly.newPlot(targetDiv, traces, layout, { responsive: true, displayModeBar: false });
+        })
+        .catch(err => {
+            targetDiv.innerHTML = `<div class="text-danger" style="padding:20px;">Error rendering bivariate chart: ${err.message}</div>`;
+        });
     }
 
     function renderDatetimeCharts() {
@@ -3533,6 +3906,352 @@
         };
         
         Plotly.newPlot('benford-chart', [trace1, trace2], layout, {responsive: true, displayModeBar: false});
+    }
+
+    function updateHypothesisFields() {
+        const testType = el.hypTestType ? el.hypTestType.value : '';
+        const columns = state.datasetInfo ? state.datasetInfo.columns : [];
+        const dtypes = state.datasetInfo ? state.datasetInfo.dtypes : {};
+        const results = state.analysisResults ? state.analysisResults.results : null;
+        
+        if (!el.hypCol1 || !el.hypCol2) return;
+        
+        el.hypCol1.innerHTML = '';
+        el.hypCol2.innerHTML = '';
+        
+        function isNumeric(col) {
+            if (!results || !results.distributions || !results.distributions.features) {
+                const dt = dtypes[col] || '';
+                return dt.includes('int') || dt.includes('float') || dt.includes('double');
+            }
+            return results.distributions.features[col]?.type === 'numerical';
+        }
+        
+        const numericCols = columns.filter(c => isNumeric(c));
+        const categoricalCols = columns.filter(c => !isNumeric(c));
+        
+        el.hypCol2Group.classList.remove('hidden');
+        el.hypPopMeanGroup.classList.add('hidden');
+        
+        if (testType === 't_test_1sample') {
+            el.hypCol1Label.innerText = "Numerical Variable (Col A)";
+            numericCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol1.appendChild(opt);
+            });
+            el.hypCol2Group.classList.add('hidden');
+            el.hypPopMeanGroup.classList.remove('hidden');
+            
+        } else if (testType === 't_test_ind') {
+            el.hypCol1Label.innerText = "Numerical Variable (Col A)";
+            numericCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol1.appendChild(opt);
+            });
+            
+            el.hypCol2Label.innerText = "Grouping Variable (Col B - Binary)";
+            const binaryCols = categoricalCols.filter(c => {
+                const feat = results ? results.distributions.features[c] : null;
+                return feat ? feat.unique_count === 2 : true;
+            });
+            const targetCats = binaryCols.length > 0 ? binaryCols : categoricalCols;
+            targetCats.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol2.appendChild(opt);
+            });
+            
+        } else if (testType === 't_test_paired') {
+            el.hypCol1Label.innerText = "Numerical Variable A";
+            numericCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol1.appendChild(opt);
+            });
+            
+            el.hypCol2Label.innerText = "Numerical Variable B";
+            numericCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol2.appendChild(opt);
+            });
+            
+        } else if (testType === 'anova' || testType === 'kruskal') {
+            el.hypCol1Label.innerText = "Numerical Variable (Col A)";
+            numericCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol1.appendChild(opt);
+            });
+            
+            el.hypCol2Label.innerText = "Categorical Grouping Variable (Col B)";
+            categoricalCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol2.appendChild(opt);
+            });
+            
+        } else if (testType === 'shapiro') {
+            el.hypCol1Label.innerText = "Numerical Variable";
+            numericCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol1.appendChild(opt);
+            });
+            el.hypCol2Group.classList.add('hidden');
+            
+        } else if (testType === 'chisq') {
+            el.hypCol1Label.innerText = "Categorical Variable A";
+            categoricalCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol1.appendChild(opt);
+            });
+            
+            el.hypCol2Label.innerText = "Categorical Variable B";
+            categoricalCols.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.innerText = c;
+                el.hypCol2.appendChild(opt);
+            });
+        }
+    }
+
+    function runHypothesisTestInCenter() {
+        const testType = el.hypTestType.value;
+        const col1 = el.hypCol1.value;
+        const col2 = el.hypCol2.value;
+        const popMean = parseFloat(el.hypPopMean.value) || 0.0;
+        const alpha = parseFloat(el.hypConfidence.value) || 0.05;
+        
+        if (!col1) {
+            showStatusMessage("Please select a target variable.", "error");
+            return;
+        }
+
+        el.hypResultsEmpty.classList.add('hidden');
+        el.hypResultsContent.classList.add('hidden');
+        document.getElementById('hyp-results-card').querySelector('.card-title').innerText = 'Running statistical test...';
+
+        fetch('/api/hypothesis/run', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Dataset-Id': state.activeDatasetId
+            },
+            body: JSON.stringify({
+                test_type: testType,
+                col1: col1,
+                col2: col2 || null,
+                pop_mean: popMean,
+                alpha: alpha
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('hyp-results-card').querySelector('.card-title').innerText = 'Test Results';
+            if (data.status === 'error') {
+                el.hypResultsEmpty.innerText = data.message;
+                el.hypResultsEmpty.classList.remove('hidden');
+                return;
+            }
+
+            el.hypResStat.innerText = typeof data.statistic === 'number' ? data.statistic.toFixed(4) : data.statistic;
+            el.hypResPvalue.innerText = typeof data.p_value === 'number' ? (data.p_value < 0.001 ? data.p_value.toExponential(4) : data.p_value.toFixed(5)) : data.p_value;
+            el.hypResInterpretation.innerText = data.interpretation;
+            
+            let powerHtml = `<strong>Achieved/Recommended sample sizes:</strong><br>${data.power_recommendation}`;
+            if (data.effect_size) {
+                powerHtml = `<strong>Effect Size (${data.effect_size.name}):</strong> <span class="text-indigo-400 font-semibold" style="color: #8b5cf6;">${data.effect_size.value.toFixed(3)} (${data.effect_size.interpretation})</span><br>` + powerHtml;
+            }
+            el.hypResPower.innerHTML = powerHtml;
+            
+            el.hypResultsContent.classList.remove('hidden');
+
+            drawHypothesisPlot(data.plot_data, col1, col2);
+        })
+        .catch(err => {
+            document.getElementById('hyp-results-card').querySelector('.card-title').innerText = 'Test Results';
+            el.hypResultsEmpty.innerText = "Error executing test: " + err.message;
+            el.hypResultsEmpty.classList.remove('hidden');
+        });
+    }
+
+    function drawHypothesisPlot(plotData, col1, col2) {
+        const chartDiv = el.hypPlotlyChart;
+        if (!plotData) {
+            chartDiv.innerHTML = '<div class="text-muted" style="text-align: center; padding: 40px;">No visualization available for this test.</div>';
+            return;
+        }
+
+        let traces = [];
+        let layout = {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            margin: { t: 30, b: 40, l: 50, r: 20 },
+            xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)', title: { text: col1, font: { color: '#94a3b8' } } },
+            yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' }
+        };
+
+        if (plotData.type === 'distribution_vs_line') {
+            traces.push({
+                x: plotData.values,
+                type: 'histogram',
+                name: 'Sample Distribution',
+                marker: { color: 'rgba(99, 102, 241, 0.4)', line: { color: '#6366f1', width: 1 } }
+            });
+            
+            layout.shapes = [
+                {
+                    type: 'line',
+                    xref: 'x',
+                    yref: 'paper',
+                    x0: plotData.line_val,
+                    y0: 0,
+                    x1: plotData.line_val,
+                    y1: 1,
+                    line: { color: '#ef4444', width: 2, dash: 'dash' }
+                },
+                {
+                    type: 'line',
+                    xref: 'x',
+                    yref: 'paper',
+                    x0: plotData.mean_val,
+                    y0: 0,
+                    x1: plotData.mean_val,
+                    y1: 1,
+                    line: { color: '#10b981', width: 2 }
+                }
+            ];
+            
+            layout.annotations = [
+                {
+                    x: plotData.line_val,
+                    y: 0.9,
+                    yref: 'paper',
+                    text: `H0 Mean: ${plotData.line_val}`,
+                    showarrow: true,
+                    arrowhead: 2,
+                    arrowcolor: '#ef4444',
+                    font: { color: '#ef4444', size: 9 },
+                    bgcolor: 'rgba(15,23,42,0.8)'
+                },
+                {
+                    x: plotData.mean_val,
+                    y: 0.7,
+                    yref: 'paper',
+                    text: `Sample Mean: ${plotData.mean_val.toFixed(3)}`,
+                    showarrow: true,
+                    arrowhead: 2,
+                    arrowcolor: '#10b981',
+                    font: { color: '#10b981', size: 9 },
+                    bgcolor: 'rgba(15,23,42,0.8)'
+                }
+            ];
+            layout.showlegend = false;
+
+        } else if (plotData.type === 'grouped_box') {
+            traces.push({
+                y: plotData.group1_values,
+                type: 'box',
+                name: plotData.group1_name,
+                marker: { color: '#06b6d4' }
+            });
+            traces.push({
+                y: plotData.group2_values,
+                type: 'box',
+                name: plotData.group2_name,
+                marker: { color: '#8b5cf6' }
+            });
+            layout.xaxis = { title: { text: col2, font: { color: '#94a3b8' } } };
+            layout.yaxis = { title: { text: col1, font: { color: '#94a3b8' } } };
+            layout.showlegend = false;
+
+        } else if (plotData.type === 'paired_scatter') {
+            traces.push({
+                x: plotData.x,
+                y: plotData.y,
+                mode: 'markers',
+                type: 'scatter',
+                marker: { color: 'rgba(16, 185, 129, 0.6)', size: 7 }
+            });
+            
+            const minVal = Math.min(...plotData.x, ...plotData.y);
+            const maxVal = Math.max(...plotData.x, ...plotData.y);
+            traces.push({
+                x: [minVal, maxVal],
+                y: [minVal, maxVal],
+                mode: 'lines',
+                type: 'scatter',
+                name: 'Equal Line',
+                line: { color: '#cbd5e1', dash: 'dash', width: 1 }
+            });
+            
+            layout.xaxis = { title: { text: plotData.labels[0], font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.yaxis = { title: { text: plotData.labels[1], font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.showlegend = false;
+
+        } else if (plotData.type === 'multi_group_box') {
+            plotData.groups.forEach(g => {
+                traces.push({
+                    y: g.values,
+                    type: 'box',
+                    name: g.name
+                });
+            });
+            layout.xaxis = { title: { text: col2, font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.yaxis = { title: { text: col1, font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.showlegend = false;
+
+        } else if (plotData.type === 'qq_plot') {
+            traces.push({
+                x: plotData.x,
+                y: plotData.y,
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Sample points',
+                marker: { color: '#8b5cf6', size: 5 }
+            });
+            
+            const minX = Math.min(...plotData.x);
+            const maxX = Math.max(...plotData.x);
+            const n = plotData.y.length;
+            const q25_y = plotData.y[Math.floor(n * 0.25)];
+            const q75_y = plotData.y[Math.floor(n * 0.75)];
+            const q25_x = -0.674;
+            const q75_x = 0.674;
+            const slope = (q75_y - q25_y) / (q75_x - q25_x);
+            const intercept = q25_y - slope * q25_x;
+            
+            traces.push({
+                x: [minX, maxX],
+                y: [slope * minX + intercept, slope * maxX + intercept],
+                mode: 'lines',
+                type: 'scatter',
+                name: 'Normal ref',
+                line: { color: '#ef4444' }
+            });
+            
+            layout.xaxis = { title: { text: 'Theoretical Quantiles', font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.yaxis = { title: { text: 'Sample Quantiles', font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.showlegend = false;
+
+        } else if (plotData.type === 'contingency_heatmap') {
+            traces.push({
+                z: plotData.z,
+                x: plotData.x,
+                y: plotData.y,
+                type: 'heatmap',
+                colorscale: 'Blues'
+            });
+            
+            layout.xaxis = { title: { text: col2, font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+            layout.yaxis = { title: { text: col1, font: { color: '#94a3b8' } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' };
+        }
+
+        Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
     }
 
     // Trigger initialization on DOM Load
