@@ -142,6 +142,10 @@ def test_run():
     import backend.main as main_module
     if main_module.CURRENT_DF is not None:
         main_module.CURRENT_DF = main_module.CURRENT_DF.drop(columns=["SurvivalLeak"], errors="ignore")
+    if main_module.ACTIVE_DATASET_ID in main_module.DATASETS:
+        state = main_module.DATASETS[main_module.ACTIVE_DATASET_ID]
+        state["df"] = state["df"].drop(columns=["SurvivalLeak"], errors="ignore")
+        state["df_full"] = state["df_full"].drop(columns=["SurvivalLeak"], errors="ignore")
     fs_res = client.post("/api/feature-selection", data={"target_column": "Survived"})
     assert fs_res.status_code == 200, "FastAPI feature selection endpoint should succeed"
     
@@ -159,6 +163,10 @@ def test_run():
     print("\nTesting /api/export/dictionary endpoint...")
     if main_module.CURRENT_DF is not None:
         main_module.CURRENT_DF = df.copy()
+    if main_module.ACTIVE_DATASET_ID in main_module.DATASETS:
+        state = main_module.DATASETS[main_module.ACTIVE_DATASET_ID]
+        state["df"] = df.copy()
+        state["df_full"] = df.copy()
     dict_res = client.get("/api/export/dictionary")
     assert dict_res.status_code == 200, "FastAPI export dictionary endpoint should succeed"
     

@@ -1962,6 +1962,62 @@ async def run_hypothesis_test(request: HypothesisRequest, x_dataset_id: Optional
     )
     return res
 
+@app.get("/api/timeseries/analyze")
+async def timeseries_analyze(date_col: str, num_col: str, lag: int = 1, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.datetime_eda import DatetimeEdaModule
+    module = DatetimeEdaModule()
+    res = module.analyze_time_series(df, date_col, num_col, lag)
+    return res
+
+@app.get("/api/geospatial/analyze")
+async def geospatial_analyze(lat_col: str, lon_col: str, color_col: Optional[str] = None, eps: float = 0.5, min_samples: int = 5, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.geospatial import GeospatialModule
+    module = GeospatialModule()
+    res = module.analyze_spatial(df, lat_col, lon_col, color_col, eps, min_samples)
+    return res
+
+@app.get("/api/geospatial/choropleth")
+async def geospatial_choropleth(state_col: str, value_col: str, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.geospatial import GeospatialModule
+    module = GeospatialModule()
+    res = module.analyze_choropleth(df, state_col, value_col)
+    return res
+
+@app.get("/api/nlp/analyze")
+async def nlp_analyze(column_name: str, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.text_eda import TextEdaModule
+    module = TextEdaModule()
+    res = module.analyze_text_nlp(df, column_name)
+    return res
+
 os.makedirs("frontend", exist_ok=True)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 

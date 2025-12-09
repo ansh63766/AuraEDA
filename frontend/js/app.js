@@ -202,10 +202,12 @@
         // Advanced EDA tab
         subtabBtnBivariate: document.getElementById('subtab-btn-bivariate'),
         subtabBtnDatetime: document.getElementById('subtab-btn-datetime'),
+        subtabBtnGeospatial: document.getElementById('subtab-btn-geospatial'),
         subtabBtnText: document.getElementById('subtab-btn-text'),
         subtabBtnOutliers: document.getElementById('subtab-btn-outliers'),
         paneAdvancedBivariate: document.getElementById('pane-advanced-bivariate'),
         paneAdvancedDatetime: document.getElementById('pane-advanced-datetime'),
+        paneAdvancedGeospatial: document.getElementById('pane-advanced-geospatial'),
         paneAdvancedText: document.getElementById('pane-advanced-text'),
         paneAdvancedOutliers: document.getElementById('pane-advanced-outliers'),
         
@@ -216,18 +218,45 @@
         noDatetimeAlert: document.getElementById('no-datetime-alert'),
         datetimePanelWrapper: document.getElementById('datetime-panel-wrapper'),
         datetimeColSelect: document.getElementById('datetime-col-select'),
-        datetimeRangeText: document.getElementById('datetime-range-text'),
-        datetimeTimelineChart: document.getElementById('datetime-timeline-chart'),
-        datetimeHourlyChart: document.getElementById('datetime-hourly-chart'),
-        datetimeWeeklyChart: document.getElementById('datetime-weekly-chart'),
-        datetimeMonthlyChart: document.getElementById('datetime-monthly-chart'),
+        timeseriesNumSelect: document.getElementById('timeseries-num-select'),
+        timeseriesLagRange: document.getElementById('timeseries-lag-range'),
+        timeseriesLagVal: document.getElementById('timeseries-lag-val'),
+        btnRunTimeseries: document.getElementById('btn-run-timeseries'),
+        timeseriesAdfStat: document.getElementById('timeseries-adf-stat'),
+        timeseriesAdfP: document.getElementById('timeseries-adf-p'),
+        timeseriesAdfInterpretation: document.getElementById('timeseries-adf-interpretation'),
+        timeseriesSpikesTbody: document.getElementById('timeseries-spikes-tbody'),
         
+        noGeospatialAlert: document.getElementById('no-geospatial-alert'),
+        geospatialPanelWrapper: document.getElementById('geospatial-panel-wrapper'),
+        geospatialMapType: document.getElementById('geospatial-map-type'),
+        geospatialLatSelect: document.getElementById('geospatial-lat-select'),
+        geospatialLonSelect: document.getElementById('geospatial-lon-select'),
+        geospatialColorSelect: document.getElementById('geospatial-color-select'),
+        geospatialStateSelect: document.getElementById('geospatial-state-select'),
+        geospatialValSelect: document.getElementById('geospatial-val-select'),
+        geospatialEpsInput: document.getElementById('geospatial-eps-input'),
+        geospatialMinSamplesInput: document.getElementById('geospatial-min-samples-input'),
+        btnRunGeospatial: document.getElementById('btn-run-geospatial'),
+        btnRunChoropleth: document.getElementById('btn-run-choropleth'),
+        geospatialClusterCount: document.getElementById('geospatial-cluster-count'),
+        geospatialNoiseCount: document.getElementById('geospatial-noise-count'),
+        geospatialTotalPoints: document.getElementById('geospatial-total-points'),
+        geospatialLeafletMap: document.getElementById('geospatial-leaflet-map'),
+
         noTextAlert: document.getElementById('no-text-alert'),
         textPanelWrapper: document.getElementById('text-panel-wrapper'),
         textColSelect: document.getElementById('text-col-select'),
-        textStatsTbody: document.getElementById('text-stats-tbody'),
-        textUnigramChart: document.getElementById('text-unigram-chart'),
-        textBigramChart: document.getElementById('text-bigram-chart'),
+        btnRunNlp: document.getElementById('btn-run-nlp'),
+        nlpReadabilityScore: document.getElementById('nlp-readability-score'),
+        nlpReadabilityGrade: document.getElementById('nlp-readability-grade'),
+        nlpReadabilityInterp: document.getElementById('nlp-readability-interp'),
+        nlpPlotlySentiment: document.getElementById('nlp-plotly-sentiment'),
+        nlpSentimentBadge: document.getElementById('nlp-sentiment-badge'),
+        nlpTopicsContainer: document.getElementById('nlp-topics-container'),
+        nlpWordcloud: document.getElementById('nlp-wordcloud'),
+        nlpUnigramChart: document.getElementById('nlp-unigram-chart'),
+        nlpBigramChart: document.getElementById('nlp-bigram-chart'),
         
         noOutliersAlert: document.getElementById('no-outliers-alert'),
         outliersPanelWrapper: document.getElementById('outliers-panel-wrapper'),
@@ -579,13 +608,32 @@
         // Advanced EDA sub-panes
         el.subtabBtnBivariate.addEventListener('click', () => switchAdvancedPane('bivariate'));
         el.subtabBtnDatetime.addEventListener('click', () => switchAdvancedPane('datetime'));
+        el.subtabBtnGeospatial.addEventListener('click', () => {
+            switchAdvancedPane('geospatial');
+            setTimeout(() => {
+                if (state.mapInstance) state.mapInstance.invalidateSize();
+            }, 100);
+        });
         el.subtabBtnText.addEventListener('click', () => switchAdvancedPane('text'));
         el.subtabBtnOutliers.addEventListener('click', () => switchAdvancedPane('outliers'));
 
         el.bivariateXSelect.addEventListener('change', renderBivariateChart);
         el.bivariateYSelect.addEventListener('change', renderBivariateChart);
-        el.datetimeColSelect.addEventListener('change', renderDatetimeCharts);
-        el.textColSelect.addEventListener('change', renderTextCharts);
+        
+        // Time series & Geospatial & NLP actions
+        el.timeseriesLagRange.addEventListener('input', () => {
+            el.timeseriesLagVal.innerText = el.timeseriesLagRange.value;
+        });
+        el.datetimeColSelect.addEventListener('change', executeTimeseriesSuite);
+        el.timeseriesNumSelect.addEventListener('change', executeTimeseriesSuite);
+        el.btnRunTimeseries.addEventListener('click', executeTimeseriesSuite);
+        
+        el.btnRunGeospatial.addEventListener('click', executeGeospatialSuite);
+        el.btnRunChoropleth.addEventListener('click', executeChoroplethSuite);
+        el.geospatialMapType.addEventListener('change', toggleGeospatialUI);
+        
+        el.textColSelect.addEventListener('change', executeNlpSuite);
+        el.btnRunNlp.addEventListener('click', executeNlpSuite);
 
         // Data sheet pagination & search
         el.sheetPrevBtn.addEventListener('click', () => {
@@ -2430,12 +2478,14 @@
         // Bivariate selector setup
         el.bivariateXSelect.innerHTML = '';
         el.bivariateYSelect.innerHTML = '';
+        if (el.bivariateZSelect) el.bivariateZSelect.innerHTML = '<option value="">-- None (2D Plot) --</option>';
         results.dataset_summary.columns.forEach(col => {
             const opt = document.createElement('option');
             opt.value = col;
             opt.innerText = col;
             el.bivariateXSelect.appendChild(opt.cloneNode(true));
             el.bivariateYSelect.appendChild(opt.cloneNode(true));
+            if (el.bivariateZSelect) el.bivariateZSelect.appendChild(opt.cloneNode(true));
         });
         if (results.dataset_summary.columns.length >= 2) {
             el.bivariateXSelect.value = results.dataset_summary.columns[0];
@@ -2443,9 +2493,19 @@
         }
         renderBivariateChart();
 
-        // Datetime Setup
+        // Extract numeric columns list
+        const numericColumns = [];
+        const allColumns = results.dataset_summary.columns;
+        Object.entries(results.dataset_summary.dtypes).forEach(([col, dtype]) => {
+            const dt = dtype.toLowerCase();
+            if (dt.includes('int') || dt.includes('float') || dt.includes('double') || dt.includes('number')) {
+                numericColumns.push(col);
+            }
+        });
+
+        // Datetime & Time Series Setup
         const dtData = results.results.datetime_eda;
-        if (dtData && dtData.status === 'success') {
+        if (dtData && dtData.status === 'success' && Object.keys(dtData.features).length > 0) {
             el.noDatetimeAlert.classList.add('hidden');
             el.datetimePanelWrapper.classList.remove('hidden');
             
@@ -2456,15 +2516,73 @@
                 opt.innerText = col;
                 el.datetimeColSelect.appendChild(opt);
             });
-            renderDatetimeCharts();
+
+            el.timeseriesNumSelect.innerHTML = '';
+            numericColumns.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col;
+                opt.innerText = col;
+                el.timeseriesNumSelect.appendChild(opt);
+            });
+            if (numericColumns.length > 0) {
+                el.timeseriesNumSelect.value = numericColumns[0];
+            }
+            
+            executeTimeseriesSuite();
         } else {
             el.noDatetimeAlert.classList.remove('hidden');
             el.datetimePanelWrapper.classList.add('hidden');
         }
 
-        // Text Setup
+        // Geospatial Setup
+        const geoData = results.results.geospatial;
+        if (geoData && (geoData.status === 'success' || (geoData.detected_state_columns && geoData.detected_state_columns.length > 0))) {
+            el.noGeospatialAlert.classList.add('hidden');
+            el.geospatialPanelWrapper.classList.remove('hidden');
+            
+            el.geospatialLatSelect.innerHTML = '';
+            el.geospatialLonSelect.innerHTML = '';
+            el.geospatialColorSelect.innerHTML = '<option value="">-- None (Cluster IDs) --</option>';
+            
+            allColumns.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col;
+                opt.innerText = col;
+                el.geospatialLatSelect.appendChild(opt.cloneNode(true));
+                el.geospatialLonSelect.appendChild(opt.cloneNode(true));
+                el.geospatialColorSelect.appendChild(opt.cloneNode(true));
+            });
+
+            const detectedLats = geoData.detected_lat_columns || [];
+            const detectedLons = geoData.detected_lon_columns || [];
+            if (detectedLats.length > 0) el.geospatialLatSelect.value = detectedLats[0];
+            if (detectedLons.length > 0) el.geospatialLonSelect.value = detectedLons[0];
+            
+            el.geospatialStateSelect.innerHTML = '';
+            el.geospatialValSelect.innerHTML = '';
+            
+            allColumns.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col;
+                opt.innerText = col;
+                el.geospatialStateSelect.appendChild(opt.cloneNode(true));
+                el.geospatialValSelect.appendChild(opt.cloneNode(true));
+            });
+            
+            const detectedStates = geoData.detected_state_columns || [];
+            if (detectedStates.length > 0) el.geospatialStateSelect.value = detectedStates[0];
+            if (numericColumns.length > 0) el.geospatialValSelect.value = numericColumns[0];
+            
+            toggleGeospatialUI();
+            executeGeospatialSuite();
+        } else {
+            el.noGeospatialAlert.classList.remove('hidden');
+            el.geospatialPanelWrapper.classList.add('hidden');
+        }
+
+        // Text & NLP Setup
         const txtData = results.results.text_eda;
-        if (txtData && txtData.status === 'success') {
+        if (txtData && txtData.status === 'success' && Object.keys(txtData.features).length > 0) {
             el.noTextAlert.classList.add('hidden');
             el.textPanelWrapper.classList.remove('hidden');
             
@@ -2475,7 +2593,7 @@
                 opt.innerText = col;
                 el.textColSelect.appendChild(opt);
             });
-            renderTextCharts();
+            executeNlpSuite();
         } else {
             el.noTextAlert.classList.remove('hidden');
             el.textPanelWrapper.classList.add('hidden');
@@ -2661,96 +2779,459 @@
         });
     }
 
-    function renderDatetimeCharts() {
-        const results = state.analysisResults;
-        const col = el.datetimeColSelect.value;
-        const feature = results.results.datetime_eda.features[col];
+    function executeTimeseriesSuite() {
+        const dateCol = el.datetimeColSelect.value;
+        const numCol = el.timeseriesNumSelect.value;
+        const lag = el.timeseriesLagRange.value;
+        
+        if (!dateCol || !numCol) return;
+        
+        // Show loading inside containers
+        document.getElementById('timeseries-plotly-stl').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Computing STL decomposition...</div>';
+        document.getElementById('timeseries-plotly-acf').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Calculating ACF...</div>';
+        document.getElementById('timeseries-plotly-pacf').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Calculating PACF...</div>';
+        document.getElementById('timeseries-plotly-lag').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Rendering lag plot...</div>';
+        document.getElementById('timeseries-plotly-heatmap').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Aggregating calendar cycles...</div>';
+        
+        fetch(`/api/timeseries/analyze?date_col=${encodeURIComponent(dateCol)}&num_col=${encodeURIComponent(numCol)}&lag=${lag}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                showStatusMessage(data.message, "error");
+                return;
+            }
+            
+            // 1. ADF Update
+            el.timeseriesAdfStat.innerText = data.adf.statistic.toFixed(4);
+            el.timeseriesAdfP.innerText = data.adf.p_value.toFixed(4);
+            el.timeseriesAdfInterpretation.innerText = data.adf.interpretation;
+            
+            // 2. Spikes Update
+            const tbody = el.timeseriesSpikesTbody;
+            tbody.innerHTML = '';
+            if (data.spikes && data.spikes.length > 0) {
+                data.spikes.forEach(s => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${s.timestamp}</strong></td>
+                        <td>${s.value.toFixed(4)}</td>
+                        <td class="text-danger" style="font-weight:bold;">${s.z_score.toFixed(2)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-muted" style="text-align:center; padding:10px;">No anomalous standard deviation spikes detected.</td></tr>';
+            }
+            
+            // 3. STL stacked Plotly line plots
+            const traceObs = { x: data.timestamps, y: data.observed, name: 'Observed', type: 'scatter', line: { color: '#06b6d4', width: 1.5 } };
+            const traceTrend = { x: data.timestamps, y: data.trend, name: 'Trend', type: 'scatter', xaxis: 'x', yaxis: 'y', line: { color: '#ef4444', width: 2 } };
+            const traceSeasonal = { x: data.timestamps, y: data.seasonal, name: 'Seasonal', type: 'scatter', xaxis: 'x', yaxis: 'y2', line: { color: '#8b5cf6', width: 1.5 } };
+            const traceResid = { x: data.timestamps, y: data.residual, name: 'Residual', type: 'scatter', xaxis: 'x', yaxis: 'y3', line: { color: '#10b981', width: 1 } };
+            
+            const stlLayout = {
+                grid: { rows: 3, columns: 1, pattern: 'coupled' },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { t: 20, b: 40, l: 50, r: 20 },
+                showlegend: true,
+                legend: { orientation: 'h', x: 0, y: 1.1, font: { color: '#94a3b8' } },
+                xaxis: { anchor: 'y3', tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' },
+                yaxis: { domain: [0.68, 1.0], tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' },
+                yaxis2: { domain: [0.34, 0.64], tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' },
+                yaxis3: { domain: [0.0, 0.30], tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, gridcolor: 'rgba(255,255,255,0.05)' }
+            };
+            Plotly.newPlot('timeseries-plotly-stl', [traceObs, traceTrend, traceSeasonal, traceResid], stlLayout, { responsive: true });
+            
+            // 4. ACF Plot
+            if (data.acf.lags && data.acf.lags.length > 0) {
+                const traceAcf = { x: data.acf.lags, y: data.acf.values, type: 'bar', marker: { color: '#06b6d4' }, name: 'ACF' };
+                const acfLayout = {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 25, b: 30, l: 40, r: 10 },
+                    title: { text: 'Autocorrelation (ACF)', font: { color: '#94a3b8', size: 11 } },
+                    xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' } },
+                    yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, range: [-1.1, 1.1] },
+                    shapes: [
+                        { type: 'line', x0: 0, x1: data.acf.lags.length - 1, y0: data.acf.conf_interval, y1: data.acf.conf_interval, line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' } },
+                        { type: 'line', x0: 0, x1: data.acf.lags.length - 1, y0: -data.acf.conf_interval, y1: -data.acf.conf_interval, line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' } }
+                    ]
+                };
+                Plotly.newPlot('timeseries-plotly-acf', [traceAcf], acfLayout, { responsive: true, displayModeBar: false });
+            }
 
-        if (!feature) return;
+            // 5. PACF Plot
+            if (data.pacf.lags && data.pacf.lags.length > 0) {
+                const tracePacf = { x: data.pacf.lags, y: data.pacf.values, type: 'bar', marker: { color: '#8b5cf6' }, name: 'PACF' };
+                const pacfLayout = {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 25, b: 30, l: 40, r: 10 },
+                    title: { text: 'Partial Autocorrelation (PACF)', font: { color: '#94a3b8', size: 11 } },
+                    xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' } },
+                    yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' }, range: [-1.1, 1.1] },
+                    shapes: [
+                        { type: 'line', x0: 0, x1: data.pacf.lags.length - 1, y0: data.pacf.conf_interval, y1: data.pacf.conf_interval, line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' } },
+                        { type: 'line', x0: 0, x1: data.pacf.lags.length - 1, y0: -data.pacf.conf_interval, y1: -data.pacf.conf_interval, line: { color: 'rgba(239, 68, 68, 0.5)', width: 1.5, dash: 'dash' } }
+                    ]
+                };
+                Plotly.newPlot('timeseries-plotly-pacf', [tracePacf], pacfLayout, { responsive: true, displayModeBar: false });
+            }
 
-        el.datetimeRangeText.innerText = `Timeline limits: ${feature.min_date} to ${feature.max_date} | Duration: ${feature.range_days} days`;
+            // 6. Lag Plot
+            document.getElementById('timeseries-lag-plot-subtitle').innerText = `Scatter mapping against past lag (k = ${data.lag_plot.lag})`;
+            const traceLag = {
+                x: data.lag_plot.y_t_lag,
+                y: data.lag_plot.y_t,
+                mode: 'markers',
+                type: 'scatter',
+                marker: { color: 'rgba(6, 182, 212, 0.6)', size: 4 }
+            };
+            const lagLayout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { t: 15, b: 30, l: 40, r: 10 },
+                xaxis: { title: { text: `Y_(t-${data.lag_plot.lag})`, font: { color: '#94a3b8', size: 10 } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' } },
+                yaxis: { title: { text: 'Y_t', font: { color: '#94a3b8', size: 10 } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' } }
+            };
+            Plotly.newPlot('timeseries-plotly-lag', [traceLag], lagLayout, { responsive: true, displayModeBar: false });
 
-        // Hourly
-        destroyChart('dtHour');
-        state.charts.dtHour = new Chart(el.datetimeHourlyChart.getContext('2d'), {
-            type: 'line',
-            data: {
-                labels: feature.hourly.labels,
-                datasets: [{ label: 'Hour frequency', data: feature.hourly.counts, borderColor: '#06b6d4', fill: false }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
-        });
-
-        // Weekly
-        destroyChart('dtWeek');
-        state.charts.dtWeek = new Chart(el.datetimeWeeklyChart.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: feature.weekly.labels,
-                datasets: [{ label: 'Weekday frequency', data: feature.weekly.counts, backgroundColor: '#6366f1' }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
-        });
-
-        // Monthly
-        destroyChart('dtMonth');
-        state.charts.dtMonth = new Chart(el.datetimeMonthlyChart.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: feature.monthly.labels,
-                datasets: [{ label: 'Monthly frequency', data: feature.monthly.counts, backgroundColor: '#10b981' }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
-        });
-
-        // Timeline Trend
-        destroyChart('dtTimeline');
-        state.charts.dtTimeline = new Chart(el.datetimeTimelineChart.getContext('2d'), {
-            type: 'line',
-            data: {
-                labels: feature.timeline.labels,
-                datasets: [{ label: 'Records over time', data: feature.timeline.counts, borderColor: '#a855f7', tension: 0.1, fill: true, backgroundColor: 'rgba(168, 85, 247, 0.1)' }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
+            // 7. Seasonality Heatmap
+            if (data.seasonality_heatmap.x && data.seasonality_heatmap.x.length > 0) {
+                const heatTrace = {
+                    x: data.seasonality_heatmap.x,
+                    y: data.seasonality_heatmap.y,
+                    z: data.seasonality_heatmap.z,
+                    type: 'heatmap',
+                    colorscale: 'Electric',
+                    showscale: true,
+                    colorbar: { tickcolor: '#94a3b8', thickness: 12 }
+                };
+                const heatLayout = {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 10, b: 35, l: 50, r: 10 },
+                    xaxis: { title: { text: 'Week of Year', font: { color: '#94a3b8', size: 10 } }, tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' } },
+                    yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8' } }
+                };
+                Plotly.newPlot('timeseries-plotly-heatmap', [heatTrace], heatLayout, { responsive: true });
+            }
+        })
+        .catch(err => {
+            showStatusMessage(`Time series analyze failed: ${err.message}`, "error");
         });
     }
 
-    function renderTextCharts() {
-        const results = state.analysisResults;
-        const col = el.textColSelect.value;
-        const feature = results.results.text_eda.features[col];
+    function toggleGeospatialUI() {
+        const type = el.geospatialMapType.value;
+        if (type === 'scatter') {
+            document.querySelectorAll('.geospatial-scatter-only').forEach(el => el.classList.remove('hidden'));
+            document.querySelectorAll('.geospatial-choro-only').forEach(el => el.classList.add('hidden'));
+        } else {
+            document.querySelectorAll('.geospatial-scatter-only').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.geospatial-choro-only').forEach(el => el.classList.remove('hidden'));
+        }
+    }
 
-        if (!feature) return;
-
-        // Pop stats
-        el.textStatsTbody.innerHTML = `
-            <tr><td>Avg Chars length</td><td><strong>${feature.stats.avg_characters.toFixed(1)}</strong></td></tr>
-            <tr><td>Max Chars length</td><td><strong>${feature.stats.max_characters}</strong></td></tr>
-            <tr><td>Min Chars length</td><td><strong>${feature.stats.min_characters}</strong></td></tr>
-            <tr><td>Avg Words count</td><td><strong>${feature.stats.avg_words.toFixed(1)}</strong></td></tr>
-            <tr><td>Max Words count</td><td><strong>${feature.stats.max_words}</strong></td></tr>
-        `;
-
-        // Unigrams
-        destroyChart('txtUni');
-        state.charts.txtUni = new Chart(el.textUnigramChart.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: feature.unigrams.labels,
-                datasets: [{ label: 'Word count', data: feature.unigrams.counts, backgroundColor: '#06b6d4' }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y' }
+    function executeGeospatialSuite() {
+        const lat = el.geospatialLatSelect.value;
+        const lon = el.geospatialLonSelect.value;
+        const color = el.geospatialColorSelect.value;
+        const eps = el.geospatialEpsInput.value;
+        const minSamples = el.geospatialMinSamplesInput.value;
+        
+        if (!lat || !lon) return;
+        
+        el.geospatialLeafletMap.innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Clustering and loading interactive Leaflet Map...</div>';
+        
+        fetch(`/api/geospatial/analyze?lat_col=${encodeURIComponent(lat)}&lon_col=${encodeURIComponent(lon)}&color_col=${encodeURIComponent(color)}&eps=${eps}&min_samples=${minSamples}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                el.geospatialLeafletMap.innerHTML = `<div class="text-danger" style="padding:20px;">Error: ${data.message}</div>`;
+                return;
+            }
+            
+            // Update stats
+            el.geospatialClusterCount.innerText = data.n_clusters;
+            el.geospatialNoiseCount.innerText = data.noise_points;
+            el.geospatialTotalPoints.innerText = data.points.length;
+            
+            // Clear map container
+            el.geospatialLeafletMap.innerHTML = '';
+            
+            // Remove previous map instance
+            if (state.mapInstance) {
+                state.mapInstance.remove();
+                state.mapInstance = null;
+            }
+            
+            // Calculate center
+            let center = [39.8283, -98.5795];
+            let zoom = 4;
+            
+            if (data.points && data.points.length > 0) {
+                let sumLat = 0, sumLon = 0;
+                data.points.forEach(p => { sumLat += p.lat; sumLon += p.lon; });
+                center = [sumLat / data.points.length, sumLon / data.points.length];
+                zoom = 6;
+            }
+            
+            state.mapInstance = L.map('geospatial-leaflet-map').setView(center, zoom);
+            
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 20
+            }).addTo(state.mapInstance);
+            
+            const colors = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444', '#14b8a6'];
+            const getPointColor = (p) => {
+                if (p.hasOwnProperty('color_value') && color) {
+                    if (typeof p.color_value === 'number') {
+                        return '#06b6d4';
+                    }
+                    const hash = String(p.color_value).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                    return colors[hash % colors.length];
+                }
+                if (p.cluster_id === -1) return '#64748b'; // Noise/outlier: grey
+                return colors[p.cluster_id % colors.length];
+            };
+            
+            data.points.forEach(p => {
+                const ptColor = getPointColor(p);
+                let popText = `Lat: ${p.lat.toFixed(5)}<br>Lon: ${p.lon.toFixed(5)}<br>Cluster: ${p.cluster_id === -1 ? 'Noise/Outlier' : p.cluster_id}`;
+                if (p.hasOwnProperty('color_value')) {
+                    popText += `<br>Value: ${p.color_value}`;
+                }
+                
+                L.circleMarker([p.lat, p.lon], {
+                    radius: 4,
+                    fillColor: ptColor,
+                    color: '#020617',
+                    weight: 1,
+                    opacity: 0.8,
+                    fillOpacity: 0.8
+                }).addTo(state.mapInstance).bindPopup(popText);
+            });
+            
+            // Map Legend update
+            const legend = document.getElementById('map-legend');
+            legend.innerHTML = '';
+            if (data.n_clusters > 0) {
+                legend.innerHTML = `<span><strong>Clusters:</strong></span>`;
+                for (let i = 0; i < Math.min(5, data.n_clusters); i++) {
+                    legend.innerHTML += `
+                        <span style="display:inline-flex; align-items:center; gap:4px; margin-left:8px;">
+                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${colors[i]};"></span>
+                            Cluster ${i}
+                        </span>
+                    `;
+                }
+                if (data.n_clusters > 5) legend.innerHTML += `<span style="margin-left:8px;">+ ${data.n_clusters - 5} more</span>`;
+                legend.innerHTML += `
+                    <span style="display:inline-flex; align-items:center; gap:4px; margin-left:8px;">
+                        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:#64748b;"></span>
+                        Outliers (${data.noise_points})
+                    </span>
+                `;
+            }
+        })
+        .catch(err => {
+            el.geospatialLeafletMap.innerHTML = `<div class="text-danger" style="padding:20px;">Clustering failed: ${err.message}</div>`;
         });
+    }
 
-        // Bigrams
-        destroyChart('txtBi');
-        state.charts.txtBi = new Chart(el.textBigramChart.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: feature.bigrams.labels,
-                datasets: [{ label: 'Phrase count', data: feature.bigrams.counts, backgroundColor: '#6366f1' }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
+    function executeChoroplethSuite() {
+        const stateCol = el.geospatialStateSelect.value;
+        const valCol = el.geospatialValSelect.value;
+        
+        if (!stateCol || !valCol) return;
+        
+        el.geospatialLeafletMap.innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Aggregating US State boundaries...</div>';
+        
+        fetch(`/api/geospatial/choropleth?state_col=${encodeURIComponent(stateCol)}&value_col=${encodeURIComponent(valCol)}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                el.geospatialLeafletMap.innerHTML = `<div class="text-danger" style="padding:20px;">Error: ${data.message}</div>`;
+                return;
+            }
+            
+            // Remove Leaflet map instance
+            if (state.mapInstance) {
+                state.mapInstance.remove();
+                state.mapInstance = null;
+            }
+            
+            // Plotly USA States Choropleth
+            const statesList = data.data.map(d => d.state);
+            const valuesList = data.data.map(d => d.value);
+            
+            const trace = {
+                type: 'choropleth',
+                locationmode: 'USA-states',
+                locations: statesList,
+                z: valuesList,
+                text: statesList,
+                colorscale: 'Viridis',
+                colorbar: {
+                    title: data.type === 'mean' ? 'Average' : 'Count',
+                    thickness: 15,
+                    tickcolor: '#94a3b8',
+                    tickfont: { color: '#94a3b8' }
+                }
+            };
+            const layout = {
+                title: { text: `US State Choropleth Matrix (${data.type})`, font: { color: '#f1f5f9', size: 13 } },
+                geo: {
+                    scope: 'usa',
+                    bgcolor: 'rgba(0,0,0,0)',
+                    showlakes: true,
+                    lakecolor: '#020617',
+                    projection: { type: 'albers usa' }
+                },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                margin: { t: 40, b: 10, l: 10, r: 10 }
+            };
+            
+            Plotly.newPlot('geospatial-leaflet-map', [trace], layout, { responsive: true });
+        })
+        .catch(err => {
+            el.geospatialLeafletMap.innerHTML = `<div class="text-danger" style="padding:20px;">Choropleth failed: ${err.message}</div>`;
+        });
+    }
+
+    function executeNlpSuite() {
+        const colName = el.textColSelect.value;
+        if (!colName) return;
+        
+        // Show loading spinners in containers
+        document.getElementById('nlp-wordcloud').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Generating word cloud...</div>';
+        document.getElementById('nlp-plotly-sentiment').innerHTML = '<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--slate-400); font-size:13px;">Analysing sentiments...</div>';
+        el.nlpTopicsContainer.innerHTML = '<div class="text-muted" style="text-align:center; width:100%; padding:20px;">Extracting topics...</div>';
+        
+        fetch(`/api/nlp/analyze?column_name=${encodeURIComponent(colName)}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                showStatusMessage(data.message, "error");
+                return;
+            }
+            
+            // 1. Readability
+            el.nlpReadabilityScore.innerText = data.readability.flesch_score.toFixed(2);
+            el.nlpReadabilityGrade.innerText = data.readability.grade_level;
+            el.nlpReadabilityInterp.innerText = data.readability.interpretation;
+            
+            // 2. Sentiment Donut Chart
+            el.nlpSentimentBadge.innerText = `Average Score: ${data.sentiment.average_score.toFixed(2)}`;
+            const sentTrace = {
+                labels: ['Positive', 'Neutral', 'Negative'],
+                values: [data.sentiment.positive, data.sentiment.neutral, data.sentiment.negative],
+                type: 'pie',
+                marker: {
+                    colors: ['rgba(16, 185, 129, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(239, 68, 68, 0.7)']
+                },
+                hole: 0.4
+            };
+            const sentLayout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                margin: { t: 10, b: 10, l: 10, r: 10 },
+                showlegend: true,
+                legend: { font: { color: '#94a3b8', size: 10 } }
+            };
+            Plotly.newPlot('nlp-plotly-sentiment', [sentTrace], sentLayout, { responsive: true, displayModeBar: false });
+            
+            // 3. Topics Lists
+            const topicsContainer = el.nlpTopicsContainer;
+            topicsContainer.innerHTML = '';
+            data.topics.forEach(t => {
+                const card = document.createElement('div');
+                card.className = 'mini-card';
+                card.style.marginBottom = '0';
+                card.style.padding = '10px';
+                card.innerHTML = `
+                    <h4 style="font-size:11.5px; color:var(--cyan-400); font-weight:600; margin-bottom:8px; text-align:center;">Topic ${t.topic_id}</h4>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px; justify-content:center;">
+                        ${t.keywords.map(kw => `<span class="badge" style="background-color:var(--slate-800); color:var(--slate-200); font-size:9.5px; padding:2px 5px;">${kw}</span>`).join('')}
+                    </div>
+                `;
+                topicsContainer.appendChild(card);
+            });
+            
+            // 4. Word Cloud
+            const cloudContainer = el.nlpWordcloud;
+            cloudContainer.innerHTML = '';
+            if (data.wordcloud && data.wordcloud.length > 0) {
+                const maxFreq = Math.max(...data.wordcloud.map(w => w.size));
+                data.wordcloud.forEach(w => {
+                    const span = document.createElement('span');
+                    span.innerText = w.text;
+                    const size = 10 + Math.round((w.size / maxFreq) * 18);
+                    span.style.fontSize = `${size}px`;
+                    span.style.fontWeight = size > 20 ? '700' : (size > 14 ? '600' : '400');
+                    const colors = ['#06b6d4', '#6366f1', '#a855f7', '#10b981', '#f59e0b', '#38bdf8', '#c084fc'];
+                    span.style.color = colors[Math.floor(Math.random() * colors.length)];
+                    span.style.cursor = 'pointer';
+                    span.style.display = 'inline-block';
+                    span.style.margin = '4px 6px';
+                    span.style.transition = 'transform 0.2s';
+                    span.addEventListener('mouseenter', () => span.style.transform = 'scale(1.2)');
+                    span.addEventListener('mouseleave', () => span.style.transform = 'scale(1.0)');
+                    cloudContainer.appendChild(span);
+                });
+            } else {
+                cloudContainer.innerHTML = '<div class="text-muted">No word cloud data.</div>';
+            }
+            
+            // 5. Render standard unigram/bigram charts (moved to custom container)
+            const results = state.analysisResults;
+            const feature = results.results.text_eda.features[colName];
+            if (feature) {
+                const traceUni = {
+                    x: feature.unigrams.counts,
+                    y: feature.unigrams.labels,
+                    type: 'bar',
+                    orientation: 'h',
+                    marker: { color: 'rgba(6, 182, 212, 0.7)' }
+                };
+                const uniLayout = {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 5, b: 20, l: 60, r: 10 },
+                    xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8', size: 9 } },
+                    yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8', size: 9 }, autorange: 'reversed' }
+                };
+                Plotly.newPlot('nlp-unigram-chart', [traceUni], uniLayout, { responsive: true, displayModeBar: false });
+                
+                const traceBi = {
+                    x: feature.bigrams.labels,
+                    y: feature.bigrams.counts,
+                    type: 'bar',
+                    marker: { color: 'rgba(99, 102, 241, 0.7)' }
+                };
+                const biLayout = {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 5, b: 20, l: 30, r: 10 },
+                    xaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8', size: 9 } },
+                    yaxis: { tickcolor: '#94a3b8', tickfont: { color: '#94a3b8', size: 9 } }
+                };
+                Plotly.newPlot('nlp-bigram-chart', [traceBi], biLayout, { responsive: true, displayModeBar: false });
+            }
+        })
+        .catch(err => {
+            showStatusMessage(`NLP analysis failed: ${err.message}`, "error");
         });
     }
 
