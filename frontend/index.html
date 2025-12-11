@@ -413,6 +413,10 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                                     Data Sheet
                                 </button>
+                                <button class="nav-item" data-tab="deduplication">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                                    Deduplication Studio
+                                </button>
                             </div>
                         </div>
 
@@ -1053,6 +1057,9 @@
                                             <option value="text_length">NLP Text Lengths</option>
                                             <option value="add_missing_indicator">Null Binary Flag</option>
                                             <option value="row_normalize">Row Normalization</option>
+                                            <option value="knn_impute">KNN Multivariate Impute</option>
+                                            <option value="mice_impute">MICE BayesianRidge Impute</option>
+                                            <option value="winsorize">Winsorize (Custom Bounds)</option>
                                         </select>
                                     </div>
                                     <div class="form-group" id="wrangle-strategy-group">
@@ -1652,6 +1659,104 @@
                                 <button class="btn btn-secondary btn-sm" id="sheet-prev-btn">Previous</button>
                                 <span id="sheet-page-indicator" style="font-size:13px; font-weight:500;">Page 1 of 1</span>
                                 <button class="btn btn-secondary btn-sm" id="sheet-next-btn">Next</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: DEDUPLICATION STUDIO ================= -->
+                    <div class="tab-content hidden" id="tab-deduplication">
+                        <div class="section-title-box">
+                            <h2>Deduplication Studio & Record Linkage</h2>
+                            <p>Identify exact duplicate records, resolve near-duplicate rows with a side-by-side diff viewer, or merge spelling inconsistencies using Connected Components Cosine Clustering.</p>
+                        </div>
+
+                        <!-- Sub-navigation Tabs -->
+                        <div class="subtabs-header" style="margin-bottom: 20px;">
+                            <button class="subtab-btn active" id="subtab-btn-row-dup" data-sub-tab="row-dup">Near-Duplicate Rows</button>
+                            <button class="subtab-btn" id="subtab-btn-cosine-wiz" data-sub-tab="cosine-wiz">Cosine Standardizer Wizard</button>
+                        </div>
+
+                        <!-- Subtab Content 1: Near-Duplicate Rows -->
+                        <div class="subtab-pane" id="subtab-pane-row-dup">
+                            <div class="split-view">
+                                <!-- Left Control Panel -->
+                                <div class="card sidebar-card" style="width: 320px;">
+                                    <h3 class="card-title">Linkage Columns</h3>
+                                    <p class="card-subtitle">Select features to match when scanning for near-duplicates.</p>
+                                    
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label>Target Matching Columns</label>
+                                        <div id="dedup-columns-checkboxes" style="background-color: var(--slate-950); padding: 12px; border-radius: 8px; border: 1px solid var(--slate-700); max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+                                            <!-- Dynamically populated checkboxes -->
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="dedup-threshold-slider">Similarity Threshold: <span id="dedup-threshold-val" style="color: var(--cyan-400); font-weight: 600;">0.85</span></label>
+                                        <input type="range" id="dedup-threshold-slider" min="0.50" max="1.00" step="0.05" value="0.85" style="width: 100%; accent-color: var(--cyan-500);">
+                                    </div>
+
+                                    <button class="btn btn-primary" id="dedup-scan-btn" style="width: 100%; justify-content: center; margin-top: 20px;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                        Scan Duplicates
+                                    </button>
+                                </div>
+
+                                <!-- Right Side-by-Side Panel -->
+                                <div class="card flex-1">
+                                    <h3 class="card-title">Suspected Near-Duplicate Matches</h3>
+                                    <p class="card-subtitle" id="dedup-matches-meta">Run a scan to detect matching candidates side-by-side.</p>
+                                    
+                                    <div id="dedup-results-container" style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px; max-height: 520px; overflow-y: auto; padding-right: 5px;">
+                                        <div class="text-muted" style="text-align: center; padding: 60px 20px;">
+                                            No scan executed. Select linkage columns and click "Scan Duplicates" to search for near-duplicates.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subtab Content 2: Cosine Standardizer Wizard -->
+                        <div class="subtab-pane hidden" id="subtab-pane-cosine-wiz">
+                            <div class="split-view">
+                                <!-- Left Control Panel -->
+                                <div class="card sidebar-card" style="width: 320px;">
+                                    <h3 class="card-title">Standardizer Selection</h3>
+                                    <p class="card-subtitle">Cluster and standardise string categorical columns.</p>
+                                    
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="cosine-col-select">Standardization Feature</label>
+                                        <select id="cosine-col-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+                                            <!-- Categorical columns only -->
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="cosine-threshold-slider">Clustering Threshold: <span id="cosine-threshold-val" style="color: var(--indigo-400); font-weight: 600;">0.80</span></label>
+                                        <input type="range" id="cosine-threshold-slider" min="0.50" max="0.95" step="0.05" value="0.80" style="width: 100%; accent-color: var(--indigo-500);">
+                                        <p style="font-size: 11px; color: var(--slate-400); margin-top: 4px;">Lower threshold merges looser spelling variants. Higher threshold requires closer spelling similarity.</p>
+                                    </div>
+
+                                    <button class="btn btn-primary" id="cosine-cluster-btn" style="width: 100%; justify-content: center; margin-top: 20px; background: linear-gradient(135deg, var(--indigo-500) 0%, var(--violet-600) 100%);">
+                                        Cluster Column Values
+                                    </button>
+                                </div>
+
+                                <!-- Right Clusters List Panel -->
+                                <div class="card flex-1">
+                                    <h3 class="card-title">Spelling Clusters & Proposed Canonical Values</h3>
+                                    <p class="card-subtitle" id="cosine-clusters-meta">Value groupings sharing character n-gram similarities.</p>
+
+                                    <div id="cosine-clusters-container" style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px; max-height: 520px; overflow-y: auto; padding-right: 5px;">
+                                        <div class="text-muted" style="text-align: center; padding: 60px 20px;">
+                                            Select a string feature column and click "Cluster Column Values" to run connected components grouping.
+                                        </div>
+                                    </div>
+
+                                    <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+                                        <button class="btn btn-primary hidden" id="cosine-merge-submit-btn">Apply Canonical Merges</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

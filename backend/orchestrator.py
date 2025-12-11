@@ -13,6 +13,7 @@ from backend.modules.datetime_eda import DatetimeEdaModule
 from backend.modules.text_eda import TextEdaModule
 from backend.modules.outliers import OutlierModule
 from backend.modules.geospatial import GeospatialModule
+from backend.modules.deduplication import DeduplicationModule
 
 class AnalyzerOrchestrator:
     def __init__(self):
@@ -29,7 +30,8 @@ class AnalyzerOrchestrator:
             DatetimeEdaModule(),
             TextEdaModule(),
             OutlierModule(),
-            GeospatialModule()
+            GeospatialModule(),
+            DeduplicationModule()
         ]
 
     def run_all(self, df: pd.DataFrame, target_column: str = None) -> Dict[str, Any]:

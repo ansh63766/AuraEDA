@@ -1051,6 +1051,62 @@ async def wrangle_dataset(request: WrangleRequest, x_dataset_id: Optional[str] =
             q_high = df[col].quantile(0.99)
             df[col] = df[col].clip(q_low, q_high)
             code_lines.append(f"df['{col}'] = df['{col}'].clip(df['{col}'].quantile(0.01), df['{col}'].quantile(0.99))")
+
+        elif action == "replace_cell":
+            parts = strat.split(",", 1)
+            row_idx = int(parts[0])
+            val = parts[1]
+            target_dtype = df[col].dtype
+            try:
+                if pd.api.types.is_numeric_dtype(target_dtype):
+                    val = float(val) if "." in val else int(val)
+            except Exception:
+                pass
+            if row_idx in df.index:
+                df.at[row_idx, col] = val
+            else:
+                df.iloc[row_idx, df.columns.get_loc(col)] = val
+            code_lines.append(f"df.at[{row_idx}, '{col}'] = {repr(val)}")
+
+        elif action == "drop_row":
+            indices = [int(idx.strip()) for idx in strat.split(",") if idx.strip()]
+            df = df.drop(index=indices, errors="ignore")
+            code_lines.append(f"df = df.drop(index={indices}, errors='ignore')")
+
+        elif action == "winsorize":
+            q_low_pct, q_high_pct = map(float, strat.split(","))
+            q_low = df[col].quantile(q_low_pct)
+            q_high = df[col].quantile(q_high_pct)
+            df[col] = df[col].clip(q_low, q_high)
+            code_lines.append(f"df['{col}'] = df['{col}'].clip(df['{col}'].quantile({q_low_pct}), df['{col}'].quantile({q_high_pct}))")
+
+        elif action == "knn_impute":
+            from sklearn.impute import KNNImputer
+            n_neighbors = int(strat) if strat else 5
+            num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+            if len(num_cols) > 0:
+                imputer = KNNImputer(n_neighbors=n_neighbors)
+                df[num_cols] = imputer.fit_transform(df[num_cols])
+                code_lines.append(f"# KNN Imputation for all numeric columns (neighbors={n_neighbors})\nfrom sklearn.impute import KNNImputer\nimputer = KNNImputer(n_neighbors={n_neighbors})\nnum_cols = {num_cols}\ndf[num_cols] = imputer.fit_transform(df[num_cols])")
+
+        elif action == "mice_impute":
+            from sklearn.experimental import enable_iterative_imputer
+            from sklearn.impute import IterativeImputer
+            from sklearn.linear_model import BayesianRidge
+            num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+            if len(num_cols) > 0:
+                imputer = IterativeImputer(estimator=BayesianRidge(), max_iter=10, random_state=42)
+                df[num_cols] = imputer.fit_transform(df[num_cols])
+                code_lines.append(f"# MICE Iterative Imputation for all numeric columns\nfrom sklearn.experimental import enable_iterative_imputer\nfrom sklearn.impute import IterativeImputer\nfrom sklearn.linear_model import BayesianRidge\nimputer = IterativeImputer(estimator=BayesianRidge(), max_iter=10, random_state=42)\nnum_cols = {num_cols}\ndf[num_cols] = imputer.fit_transform(df[num_cols])")
+
+        elif action == "cosine_standardize":
+            import json
+            try:
+                mapping = json.loads(strat)
+                df[col] = df[col].astype(str).map(mapping).fillna(df[col])
+                code_lines.append(f"# Cosine Standardization cluster merges for '{col}'\nmapping = {repr(mapping)}\ndf['{col}'] = df['{col}'].astype(str).map(mapping).fillna(df['{col}'])")
+            except Exception:
+                pass
             
         elif action == "transform":
             if strat == "log":
@@ -2017,6 +2073,36 @@ async def nlp_analyze(column_name: str, x_dataset_id: Optional[str] = Header(Non
     module = TextEdaModule()
     res = module.analyze_text_nlp(df, column_name)
     return res
+
+class DeduplicationScanRequest(BaseModel):
+    columns: List[str]
+    threshold: float = 0.85
+
+@app.post("/api/deduplication/scan")
+async def deduplication_scan(request: DeduplicationScanRequest, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.deduplication import scan_duplicates
+    matches = scan_duplicates(df, request.columns, request.threshold)
+    return {"status": "success", "matches": matches}
+
+@app.get("/api/deduplication/cosine-clusters")
+async def deduplication_cosine_clusters(column: str, threshold: float = 0.8, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.deduplication import get_cosine_clusters
+    clusters = get_cosine_clusters(df, column, threshold)
+    return {"status": "success", "clusters": clusters}
 
 os.makedirs("frontend", exist_ok=True)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")

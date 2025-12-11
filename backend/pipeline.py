@@ -216,6 +216,63 @@ class AuraEDAPipeline(BaseEstimator, TransformerMixin):
                     params["q_high"] = float(X_temp[col].quantile(0.99))
                     X_temp[col] = X_temp[col].clip(params["q_low"], params["q_high"])
 
+            elif action == "replace_cell":
+                parts = strat.split(",", 1)
+                row_idx = int(parts[0])
+                val = parts[1]
+                target_dtype = X_temp[col].dtype
+                try:
+                    if pd.api.types.is_numeric_dtype(target_dtype):
+                        val = float(val) if "." in val else int(val)
+                except Exception:
+                    pass
+                if row_idx in X_temp.index:
+                    X_temp.at[row_idx, col] = val
+                else:
+                    X_temp.iloc[row_idx, X_temp.columns.get_loc(col)] = val
+
+            elif action == "drop_row":
+                indices = [int(idx.strip()) for idx in strat.split(",") if idx.strip()]
+                X_temp = X_temp.drop(index=indices, errors="ignore")
+
+            elif action == "winsorize":
+                if pd.api.types.is_numeric_dtype(X_temp[col]):
+                    q_low_pct, q_high_pct = map(float, strat.split(","))
+                    params["q_low"] = float(X_temp[col].quantile(q_low_pct))
+                    params["q_high"] = float(X_temp[col].quantile(q_high_pct))
+                    X_temp[col] = X_temp[col].clip(params["q_low"], params["q_high"])
+
+            elif action == "knn_impute":
+                from sklearn.impute import KNNImputer
+                n_neighbors = int(strat) if strat else 5
+                num_cols = [c for c in X_temp.columns if pd.api.types.is_numeric_dtype(X_temp[c])]
+                if len(num_cols) > 0:
+                    imputer = KNNImputer(n_neighbors=n_neighbors)
+                    imputer.fit(X_temp[num_cols])
+                    params["imputer"] = imputer
+                    params["num_cols"] = num_cols
+                    X_temp[num_cols] = imputer.transform(X_temp[num_cols])
+
+            elif action == "mice_impute":
+                from sklearn.experimental import enable_iterative_imputer
+                from sklearn.impute import IterativeImputer
+                from sklearn.linear_model import BayesianRidge
+                num_cols = [c for c in X_temp.columns if pd.api.types.is_numeric_dtype(X_temp[c])]
+                if len(num_cols) > 0:
+                    imputer = IterativeImputer(estimator=BayesianRidge(), max_iter=10, random_state=42)
+                    imputer.fit(X_temp[num_cols])
+                    params["imputer"] = imputer
+                    params["num_cols"] = num_cols
+                    X_temp[num_cols] = imputer.transform(X_temp[num_cols])
+
+            elif action == "cosine_standardize":
+                import json
+                try:
+                    mapping = json.loads(strat)
+                    X_temp[col] = X_temp[col].astype(str).map(mapping).fillna(X_temp[col])
+                except Exception:
+                    pass
+
             elif action == "transform":
                 if pd.api.types.is_numeric_dtype(X_temp[col]):
                     if strat == "log":
@@ -346,6 +403,46 @@ class AuraEDAPipeline(BaseEstimator, TransformerMixin):
             elif action == "clip":
                 if pd.api.types.is_numeric_dtype(X_out[col]) and "q_low" in params:
                     X_out[col] = X_out[col].clip(params["q_low"], params["q_high"])
+
+            elif action == "replace_cell":
+                parts = strat.split(",", 1)
+                row_idx = int(parts[0])
+                val = parts[1]
+                target_dtype = X_out[col].dtype
+                try:
+                    if pd.api.types.is_numeric_dtype(target_dtype):
+                        val = float(val) if "." in val else int(val)
+                except Exception:
+                    pass
+                if row_idx in X_out.index:
+                    X_out.at[row_idx, col] = val
+                else:
+                    X_out.iloc[row_idx, X_out.columns.get_loc(col)] = val
+
+            elif action == "drop_row":
+                indices = [int(idx.strip()) for idx in strat.split(",") if idx.strip()]
+                X_out = X_out.drop(index=indices, errors="ignore")
+
+            elif action == "winsorize" and "q_low" in params:
+                X_out[col] = X_out[col].clip(params["q_low"], params["q_high"])
+
+            elif action == "knn_impute" and "imputer" in params:
+                imputer = params["imputer"]
+                num_cols = params["num_cols"]
+                X_out[num_cols] = imputer.transform(X_out[num_cols])
+
+            elif action == "mice_impute" and "imputer" in params:
+                imputer = params["imputer"]
+                num_cols = params["num_cols"]
+                X_out[num_cols] = imputer.transform(X_out[num_cols])
+
+            elif action == "cosine_standardize":
+                import json
+                try:
+                    mapping = json.loads(strat)
+                    X_out[col] = X_out[col].astype(str).map(mapping).fillna(X_out[col])
+                except Exception:
+                    pass
 
             elif action == "transform":
                 if pd.api.types.is_numeric_dtype(X_out[col]):

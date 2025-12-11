@@ -731,6 +731,7 @@
         if (el.btnRunHypTest) {
             el.btnRunHypTest.addEventListener('click', runHypothesisTestInCenter);
         }
+        initDeduplicationListeners();
     }
 
     // Helper functions
@@ -758,6 +759,8 @@
             drawBenfordPlot();
         } else if (tabName === 'hypothesis') {
             updateHypothesisFields();
+        } else if (tabName === 'deduplication') {
+            initDeduplicationUI();
         }
     }
 
@@ -2348,6 +2351,40 @@
                 <input type="text" id="wrangle-strategy-select" placeholder="Date,ffill" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
             `;
             el.wrangleStrategySelect = document.getElementById('wrangle-strategy-select');
+        } else if (action === 'knn_impute') {
+            parent.innerHTML = `
+                <label for="wrangle-strategy-select">Number of Neighbors (K)</label>
+                <select id="wrangle-strategy-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+                    <option value="3">3 Neighbors</option>
+                    <option value="5" selected>5 Neighbors</option>
+                    <option value="10">10 Neighbors</option>
+                    <option value="15">15 Neighbors</option>
+                </select>
+            `;
+            el.wrangleStrategySelect = document.getElementById('wrangle-strategy-select');
+        } else if (action === 'mice_impute') {
+            parent.innerHTML = `
+                <label for="wrangle-strategy-select">MICE Imputer Configuration</label>
+                <input type="text" id="wrangle-strategy-select" value="BayesianRidge" disabled style="background-color: var(--slate-850); border: 1px solid var(--slate-800); color: var(--slate-400); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+            `;
+            el.wrangleStrategySelect = document.getElementById('wrangle-strategy-select');
+        } else if (action === 'winsorize') {
+            parent.innerHTML = `
+                <label>Winsorize Percentiles (Lower, Upper)</label>
+                <div style="display: flex; gap: 10px; margin-top: 2px;">
+                    <input type="number" id="winsorize-low" min="0.00" max="0.20" step="0.01" value="0.05" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 50%;">
+                    <input type="number" id="winsorize-high" min="0.80" max="1.00" step="0.01" value="0.95" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 50%;">
+                </div>
+                <input type="hidden" id="wrangle-strategy-select" value="0.05,0.95">
+            `;
+            el.wrangleStrategySelect = document.getElementById('wrangle-strategy-select');
+            const lowInput = document.getElementById('winsorize-low');
+            const highInput = document.getElementById('winsorize-high');
+            const updateHidden = () => {
+                el.wrangleStrategySelect.value = `${lowInput.value},${highInput.value}`;
+            };
+            lowInput.addEventListener('change', updateHidden);
+            highInput.addEventListener('change', updateHidden);
         } else {
             parent.innerHTML = `
                 <label for="wrangle-strategy-select">Strategy Configuration</label>
@@ -3240,15 +3277,31 @@
         const limit = state.sheetLimit;
         const offset = (state.sheetPage - 1) * limit;
         
+        state.sheetFilters = state.sheetFilters || {};
+        state.sheetSorts = state.sheetSorts || [];
+        
         let query = `SELECT rowid AS _rowid_, * FROM data`;
+        let whereClauses = [];
+        
         if (state.sheetSearch) {
-            // Build WHERE clause matching search term in any column
             const cols = state.datasetInfo.columns;
-            const terms = cols.map(c => `\`${c}\` LIKE '%${state.sheetSearch}%'`).join(' OR ');
-            query += ` WHERE ${terms}`;
+            whereClauses.push('(' + cols.map(c => `\`${c}\` LIKE '%${state.sheetSearch}%'`).join(' OR ') + ')');
         }
         
-        if (state.sheetSortCol) {
+        Object.entries(state.sheetFilters).forEach(([col, val]) => {
+            if (val) {
+                whereClauses.push(`\`${col}\` LIKE '%${val}%'`);
+            }
+        });
+        
+        if (whereClauses.length > 0) {
+            query += ` WHERE ${whereClauses.join(' AND ')}`;
+        }
+        
+        if (state.sheetSorts.length > 0) {
+            const orderBy = state.sheetSorts.map(s => `\`${s.col}\` ${s.dir}`).join(', ');
+            query += ` ORDER BY ${orderBy}`;
+        } else if (state.sheetSortCol) {
             query += ` ORDER BY \`${state.sheetSortCol}\` ${state.sheetSortDir}`;
         }
         
@@ -3270,6 +3323,9 @@
     }
 
     function renderSpreadsheet(data) {
+        state.sheetFilters = state.sheetFilters || {};
+        state.sheetSorts = state.sheetSorts || [];
+        
         // Find _rowid_ index
         const rowidIdx = data.columns.indexOf('_rowid_');
         const displayCols = data.columns.filter(c => c !== '_rowid_');
@@ -3277,23 +3333,80 @@
         // Headers
         el.spreadsheetThead.innerHTML = '';
         const trH = document.createElement('tr');
+        const trFilter = document.createElement('tr');
+        trFilter.className = 'spreadsheet-filter-row';
+
         displayCols.forEach(col => {
             const th = document.createElement('th');
-            th.style = 'cursor:pointer; position:relative;';
-            const arrow = state.sheetSortCol === col ? (state.sheetSortDir === 'ASC' ? ' &uarr;' : ' &darr;') : '';
-            th.innerHTML = `<strong>${col}</strong>${arrow}`;
-            th.addEventListener('click', () => {
-                if (state.sheetSortCol === col) {
-                    state.sheetSortDir = state.sheetSortDir === 'ASC' ? 'DESC' : 'ASC';
+            th.style = 'cursor:pointer; position:relative; padding: 10px 8px;';
+            
+            const sortIdx = state.sheetSorts.findIndex(s => s.col === col);
+            let arrow = '';
+            let priorityBadge = '';
+            
+            if (sortIdx !== -1) {
+                const sortItem = state.sheetSorts[sortIdx];
+                arrow = sortItem.dir === 'ASC' ? ' &uarr;' : ' &darr;';
+                priorityBadge = `<span style="font-size: 9px; background-color: var(--indigo-500); padding: 1px 4px; border-radius: 4px; margin-left: 2px; color:#fff;">${sortIdx + 1}</span>`;
+            } else if (state.sheetSortCol === col) {
+                arrow = state.sheetSortDir === 'ASC' ? ' &uarr;' : ' &darr;';
+            }
+            
+            th.innerHTML = `<strong>${col}</strong>${arrow}${priorityBadge}`;
+            th.addEventListener('click', (e) => {
+                if (e.shiftKey) {
+                    const idx = state.sheetSorts.findIndex(s => s.col === col);
+                    if (idx === -1) {
+                        state.sheetSorts.push({ col: col, dir: 'ASC' });
+                    } else {
+                        const currentDir = state.sheetSorts[idx].dir;
+                        if (currentDir === 'ASC') {
+                            state.sheetSorts[idx].dir = 'DESC';
+                        } else {
+                            state.sheetSorts.splice(idx, 1);
+                        }
+                    }
+                    state.sheetSortCol = null;
                 } else {
-                    state.sheetSortCol = col;
-                    state.sheetSortDir = 'ASC';
+                    state.sheetSorts = [];
+                    if (state.sheetSortCol === col) {
+                        state.sheetSortDir = state.sheetSortDir === 'ASC' ? 'DESC' : 'ASC';
+                    } else {
+                        state.sheetSortCol = col;
+                        state.sheetSortDir = 'ASC';
+                    }
                 }
                 loadSpreadsheetData();
             });
             trH.appendChild(th);
+            
+            // Render filter cell
+            const tdFilter = document.createElement('td');
+            tdFilter.style = 'padding: 4px; background-color: var(--slate-900); border-bottom: 1px solid var(--slate-700);';
+            const filterInput = document.createElement('input');
+            filterInput.type = 'text';
+            filterInput.value = state.sheetFilters[col] || '';
+            filterInput.placeholder = `Filter...`;
+            filterInput.style = 'width: 100%; background-color: var(--slate-950); border: 1px solid var(--slate-800); color: var(--slate-100); padding: 4px 8px; border-radius: 4px; font-size: 11px; outline: none;';
+            
+            filterInput.addEventListener('click', (e) => e.stopPropagation());
+            
+            let filterTimeout;
+            filterInput.addEventListener('input', (e) => {
+                clearTimeout(filterTimeout);
+                filterTimeout = setTimeout(() => {
+                    state.sheetFilters[col] = e.target.value;
+                    state.sheetPage = 1;
+                    loadSpreadsheetData();
+                }, 300);
+            });
+            
+            tdFilter.appendChild(filterInput);
+            trFilter.appendChild(tdFilter);
         });
+        
         el.spreadsheetThead.appendChild(trH);
+        el.spreadsheetThead.appendChild(trFilter);
 
         // Body rows
         el.spreadsheetTbody.innerHTML = '';
@@ -3304,8 +3417,6 @@
 
         data.rows.forEach(row => {
             const tr = document.createElement('tr');
-            
-            // Get original row index
             const origRowId = rowidIdx !== -1 ? row[rowidIdx] : null;
             const origIndex = origRowId !== null ? origRowId - 1 : null;
             
@@ -3319,6 +3430,48 @@
                 if (idx === rowidIdx) return;
                 const td = document.createElement('td');
                 td.innerText = val === null || val === undefined ? '' : val;
+                
+                td.addEventListener('dblclick', () => {
+                    const originalText = td.innerText;
+                    td.innerHTML = '';
+                    const cellInput = document.createElement('input');
+                    cellInput.type = 'text';
+                    cellInput.value = originalText;
+                    cellInput.style = 'width: 100%; background-color: var(--slate-950); border: 1px solid var(--indigo-500); color: var(--slate-100); padding: 4px; border-radius: 4px; font-size: 12px; outline: none; box-shadow: 0 0 6px rgba(99,102,241,0.5);';
+                    
+                    const saveChange = () => {
+                        const newVal = cellInput.value;
+                        if (newVal !== originalText) {
+                            const colName = displayCols[idx > rowidIdx ? idx - 1 : idx];
+                            td.innerText = newVal;
+                            
+                            const step = {
+                                column: colName,
+                                action: 'replace_cell',
+                                strategy: `${origIndex},${newVal}`
+                            };
+                            
+                            state.wranglerSteps.push(step);
+                            executeWranglePipeline();
+                        } else {
+                            td.innerText = originalText;
+                        }
+                    };
+                    
+                    cellInput.addEventListener('blur', saveChange);
+                    cellInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            saveChange();
+                        } else if (e.key === 'Escape') {
+                            cellInput.removeEventListener('blur', saveChange);
+                            td.innerText = originalText;
+                        }
+                    });
+                    
+                    td.appendChild(cellInput);
+                    cellInput.focus();
+                });
+                
                 tr.appendChild(td);
             });
             el.spreadsheetTbody.appendChild(tr);
@@ -4733,6 +4886,357 @@
         }
 
         Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+    }
+
+    // Deduplication Studio Functions
+    function initDeduplicationListeners() {
+        // Subtab clicking
+        document.querySelectorAll('#tab-deduplication .subtab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const subtab = btn.getAttribute('data-sub-tab');
+                document.querySelectorAll('#tab-deduplication .subtab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                document.querySelectorAll('#tab-deduplication .subtab-pane').forEach(p => p.classList.add('hidden'));
+                document.getElementById(`subtab-pane-${subtab}`).classList.remove('hidden');
+            });
+        });
+
+        // Dedup Similarity Threshold Slider
+        const slider = document.getElementById('dedup-threshold-slider');
+        const sliderVal = document.getElementById('dedup-threshold-val');
+        if (slider && sliderVal) {
+            slider.addEventListener('input', (e) => {
+                sliderVal.textContent = parseFloat(e.target.value).toFixed(2);
+            });
+        }
+
+        // Cosine Threshold Slider
+        const cosSlider = document.getElementById('cosine-threshold-slider');
+        const cosSliderVal = document.getElementById('cosine-threshold-val');
+        if (cosSlider && cosSliderVal) {
+            cosSlider.addEventListener('input', (e) => {
+                cosSliderVal.textContent = parseFloat(e.target.value).toFixed(2);
+            });
+        }
+
+        // Scan button click listener
+        const scanBtn = document.getElementById('dedup-scan-btn');
+        if (scanBtn) {
+            scanBtn.addEventListener('click', () => {
+                const selectedCols = Array.from(document.querySelectorAll('.dedup-col-cb:checked')).map(cb => cb.value);
+                if (selectedCols.length === 0) {
+                    showStatusMessage("Please select at least one column to match.", "warning");
+                    return;
+                }
+                const threshold = parseFloat(document.getElementById('dedup-threshold-slider').value);
+                
+                showLoading("Scanning for suspected duplicate row pairs...");
+                
+                fetch('/api/deduplication/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        columns: selectedCols,
+                        threshold: threshold
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.status === 'success') {
+                        renderDeduplicationMatches(data.matches);
+                    } else {
+                        showStatusMessage(data.message || "Failed to scan duplicates", "error");
+                    }
+                })
+                .catch(err => {
+                    hideLoading();
+                    showStatusMessage(err.message, "error");
+                });
+            });
+        }
+
+        // Cosine Standardizer Cluster Button
+        const clusterBtn = document.getElementById('cosine-cluster-btn');
+        if (clusterBtn) {
+            clusterBtn.addEventListener('click', () => {
+                const col = document.getElementById('cosine-col-select').value;
+                if (!col) {
+                    showStatusMessage("Please select a column to cluster.", "warning");
+                    return;
+                }
+                const threshold = parseFloat(document.getElementById('cosine-threshold-slider').value);
+                
+                showLoading("Clustering spelling variations in column...");
+                
+                fetch(`/api/deduplication/cosine-clusters?column=${encodeURIComponent(col)}&threshold=${threshold}`)
+                .then(res => res.json())
+                .then(data => {
+                    hideLoading();
+                    if (data.status === 'success') {
+                        renderCosineClusters(data.clusters, col);
+                    } else {
+                        showStatusMessage(data.error || "Failed to generate clusters", "error");
+                    }
+                })
+                .catch(err => {
+                    hideLoading();
+                    showStatusMessage(err.message, "error");
+                });
+            });
+        }
+    }
+
+    function initDeduplicationUI() {
+        const info = state.datasetInfo;
+        if (!info) return;
+
+        // Populate checkboxes
+        const container = document.getElementById('dedup-columns-checkboxes');
+        if (container) {
+            container.innerHTML = '';
+            info.columns.forEach(col => {
+                const label = document.createElement('label');
+                label.style = 'display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; color: var(--slate-200);';
+                
+                const dtype = state.analysisResults?.dataset_summary?.dtypes[col] || '';
+                const checked = (dtype === 'object' || dtype.includes('string')) ? 'checked' : '';
+                
+                label.innerHTML = `<input type="checkbox" class="dedup-col-cb" value="${col}" ${checked} style="accent-color: var(--cyan-500);"> ${col}`;
+                container.appendChild(label);
+            });
+        }
+
+        // Populate Cosine select dropdown
+        const cosineSelect = document.getElementById('cosine-col-select');
+        if (cosineSelect) {
+            cosineSelect.innerHTML = '';
+            info.columns.forEach(col => {
+                const dtype = state.analysisResults?.dataset_summary?.dtypes[col] || '';
+                if (dtype === 'object' || dtype.includes('string')) {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.textContent = col;
+                    cosineSelect.appendChild(option);
+                }
+            });
+            if (cosineSelect.children.length === 0) {
+                info.columns.forEach(col => {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.textContent = col;
+                    cosineSelect.appendChild(option);
+                });
+            }
+        }
+    }
+
+    function renderDeduplicationMatches(matches) {
+        const container = document.getElementById('dedup-results-container');
+        const meta = document.getElementById('dedup-matches-meta');
+        
+        if (!container) return;
+        container.innerHTML = '';
+        
+        if (matches.length === 0) {
+            meta.textContent = '0 near-duplicate matches found.';
+            container.innerHTML = `
+                <div class="text-muted" style="text-align: center; padding: 60px 20px;">
+                    No suspected duplicate row pairs found under the current settings.
+                </div>
+            `;
+            return;
+        }
+        
+        meta.innerHTML = `<span class="text-success" style="font-weight:600;">Found ${matches.length} suspected duplicate pair(s) found.</span>`;
+        
+        const scanBtn = document.getElementById('dedup-scan-btn');
+        matches.forEach((match, idx) => {
+            const row1 = match.row1;
+            const row2 = match.row2;
+            const score = match.similarity_score;
+            
+            const pairCard = document.createElement('div');
+            pairCard.style = 'background-color: var(--slate-950); border: 1px solid var(--slate-800); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 12px;';
+            
+            const pct = Math.round(score * 100);
+            pairCard.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--slate-800); padding-bottom: 6px;">
+                    <span style="font-size: 13px; font-weight: 600; color: var(--cyan-400);">Pair #${idx + 1} (${pct}% match)</span>
+                </div>
+            `;
+            
+            const tableWrapper = document.createElement('div');
+            tableWrapper.style = 'max-height: 160px; overflow-y: auto; border: 1px solid var(--slate-800); border-radius: 6px;';
+            
+            const table = document.createElement('table');
+            table.style = 'width: 100%; border-collapse: collapse; font-size: 11.5px;';
+            table.innerHTML = `
+                <thead>
+                    <tr style="background-color: var(--slate-900); border-bottom: 1px solid var(--slate-800); color: var(--slate-400);">
+                        <th style="padding: 6px; text-align: left; width: 120px;">Column</th>
+                        <th style="padding: 6px; text-align: left;">Row #${row1.row_index + 1}</th>
+                        <th style="padding: 6px; text-align: left;">Row #${row2.row_index + 1}</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            
+            const tbody = table.querySelector('tbody');
+            
+            Object.keys(row1.values).forEach(col => {
+                const val1 = row1.values[col];
+                const val2 = row2.values[col];
+                const diff = String(val1) !== String(val2);
+                
+                const tr = document.createElement('tr');
+                if (diff) {
+                    tr.style = 'background-color: rgba(239, 68, 68, 0.04); border-bottom: 1px solid var(--slate-850);';
+                } else {
+                    tr.style = 'border-bottom: 1px solid var(--slate-850);';
+                }
+                
+                tr.innerHTML = `
+                    <td style="padding: 5px 6px; font-weight: 500; color: var(--slate-500);">${col}</td>
+                    <td style="padding: 5px 6px; color: ${diff ? 'var(--rose-400)' : 'var(--slate-300)'};">${val1}</td>
+                    <td style="padding: 5px 6px; color: ${diff ? 'var(--emerald-400)' : 'var(--slate-300)'};">${val2}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            tableWrapper.appendChild(table);
+            pairCard.appendChild(tableWrapper);
+            
+            const actions = document.createElement('div');
+            actions.style = 'display: flex; gap: 10px; justify-content: flex-end;';
+            
+            const btnKeep1 = document.createElement('button');
+            btnKeep1.className = 'btn btn-secondary btn-sm';
+            btnKeep1.textContent = `Keep Row #${row1.row_index + 1}`;
+            btnKeep1.addEventListener('click', () => {
+                state.wranglerSteps.push({
+                    column: Object.keys(row1.values)[0],
+                    action: 'drop_row',
+                    strategy: `${row2.row_index}`
+                });
+                executeWranglePipeline();
+                setTimeout(() => scanBtn.click(), 1000);
+            });
+            
+            const btnKeep2 = document.createElement('button');
+            btnKeep2.className = 'btn btn-secondary btn-sm';
+            btnKeep2.textContent = `Keep Row #${row2.row_index + 1}`;
+            btnKeep2.addEventListener('click', () => {
+                state.wranglerSteps.push({
+                    column: Object.keys(row1.values)[0],
+                    action: 'drop_row',
+                    strategy: `${row1.row_index}`
+                });
+                executeWranglePipeline();
+                setTimeout(() => scanBtn.click(), 1000);
+            });
+            
+            actions.appendChild(btnKeep1);
+            actions.appendChild(btnKeep2);
+            pairCard.appendChild(actions);
+            container.appendChild(pairCard);
+        });
+    }
+
+    function renderCosineClusters(clusters, columnName) {
+        const container = document.getElementById('cosine-clusters-container');
+        const meta = document.getElementById('cosine-clusters-meta');
+        const submitBtn = document.getElementById('cosine-merge-submit-btn');
+        
+        if (!container) return;
+        container.innerHTML = '';
+        
+        if (clusters.length === 0) {
+            meta.textContent = '0 spelling variants clusters detected.';
+            container.innerHTML = `
+                <div class="text-muted" style="text-align: center; padding: 60px 20px;">
+                    No spelling clusters found. Column is standard and clean!
+                </div>
+            `;
+            submitBtn.classList.add('hidden');
+            return;
+        }
+        
+        meta.innerHTML = `<span class="text-success" style="font-weight:600;">Found ${clusters.length} value cluster(s) with potential spelling variances.</span>`;
+        submitBtn.classList.remove('hidden');
+        
+        state.activeClustersMerges = [];
+
+        clusters.forEach((cluster, idx) => {
+            const card = document.createElement('div');
+            card.style = 'background-color: var(--slate-950); border: 1px solid var(--slate-800); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 8px;';
+            
+            card.innerHTML = `
+                <div style="font-size: 13.5px; font-weight: 600; color: var(--indigo-400); border-bottom: 1px solid var(--slate-850); padding-bottom: 6px;">
+                    Cluster #${idx + 1} (${cluster.members.length} unique values)
+                </div>
+                <p style="font-size:11.5px; color: var(--slate-400); margin: 0;">Select the canonical value (to replace all other spelling variants in this group):</p>
+            `;
+            
+            const membersList = document.createElement('div');
+            membersList.style = 'display: flex; flex-direction: column; gap: 6px; margin-top: 5px;';
+            
+            cluster.members.forEach((m, mIdx) => {
+                const checked = m.value === cluster.canonical ? 'checked' : '';
+                const item = document.createElement('label');
+                item.style = 'display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; cursor: pointer; color: var(--slate-200); background-color: var(--slate-900); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--slate-800);';
+                
+                item.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="radio" name="cosine-cluster-radio-${idx}" value="${m.value.replace(/"/g, '&quot;')}" ${checked} style="accent-color: var(--indigo-500);">
+                        <span>${m.value}</span>
+                    </div>
+                    <span style="font-size: 11px; color: var(--slate-500); font-weight: 600;">Freq: ${m.frequency}</span>
+                `;
+                
+                membersList.appendChild(item);
+            });
+            
+            card.appendChild(membersList);
+            container.appendChild(card);
+            
+            state.activeClustersMerges.push({
+                canonical: cluster.canonical,
+                members: cluster.members.map(m => m.value)
+            });
+            
+            membersList.querySelectorAll('input[type="radio"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    state.activeClustersMerges[idx].canonical = e.target.value;
+                });
+            });
+        });
+
+        submitBtn.onclick = () => {
+            const mapping = {};
+            state.activeClustersMerges.forEach(item => {
+                const target = item.canonical;
+                item.members.forEach(member => {
+                    mapping[member] = target;
+                });
+            });
+
+            state.wranglerSteps.push({
+                column: columnName,
+                action: 'cosine_standardize',
+                strategy: JSON.stringify(mapping)
+            });
+            
+            executeWranglePipeline();
+            
+            container.innerHTML = `
+                <div class="text-success" style="text-align: center; padding: 40px 20px; font-weight: 600;">
+                    ✓ Canonical cluster merges successfully added to the wrangle pipeline!
+                </div>
+            `;
+            submitBtn.classList.add('hidden');
+        };
     }
 
     // Trigger initialization on DOM Load
