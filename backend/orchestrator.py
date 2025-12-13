@@ -14,6 +14,7 @@ from backend.modules.text_eda import TextEdaModule
 from backend.modules.outliers import OutlierModule
 from backend.modules.geospatial import GeospatialModule
 from backend.modules.deduplication import DeduplicationModule
+from backend.modules.feature_factory import FeatureFactoryModule
 
 class AnalyzerOrchestrator:
     def __init__(self):
@@ -31,7 +32,8 @@ class AnalyzerOrchestrator:
             TextEdaModule(),
             OutlierModule(),
             GeospatialModule(),
-            DeduplicationModule()
+            DeduplicationModule(),
+            FeatureFactoryModule()
         ]
 
     def run_all(self, df: pd.DataFrame, target_column: str = None) -> Dict[str, Any]:

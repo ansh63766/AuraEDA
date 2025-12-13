@@ -1144,6 +1144,58 @@ async def wrangle_dataset(request: WrangleRequest, x_dataset_id: Optional[str] =
             df[col] = encoded_series.reindex(df.index).fillna(encoded_series.mean())
             code_lines.append(f"# Target encode '{col}'\nfrom sklearn.preprocessing import TargetEncoder\nte = TargetEncoder(cv=3, random_state=42)\ndf['{col}'] = te.fit_transform(df[[col]], df['{request.target_column}'])")
 
+        # --- Smoothed Leave-One-Out Target Encoding ---
+        elif action == "loo_target_encode" and request.target_column:
+            smoothing_factor = 10.0
+            try:
+                if strat:
+                    smoothing_factor = float(strat)
+            except Exception:
+                smoothing_factor = 10.0
+            y_col = df[request.target_column].dropna()
+            valid_idx = y_col.index
+            global_mean = float(y_col.mean()) if len(y_col) > 0 else 0.0
+            col_vals = df.loc[valid_idx, col]
+            
+            # Simple LOO calculation
+            sums = y_col.groupby(col_vals).sum()
+            counts = y_col.groupby(col_vals).count()
+            
+            encoded = []
+            for idx in valid_idx:
+                val = df.loc[idx, col]
+                sum_val = sums.get(val, 0.0)
+                count_val = counts.get(val, 0)
+                y_i = df.loc[idx, request.target_column]
+                if count_val > 1:
+                    encoded.append((sum_val - y_i + smoothing_factor * global_mean) / (count_val - 1 + smoothing_factor))
+                else:
+                    encoded.append(global_mean)
+            
+            encoded_series = pd.Series(encoded, index=valid_idx)
+            df[col] = encoded_series.reindex(df.index).fillna(global_mean)
+            code_lines.append(f"# Smoothed Leave-One-Out target encoding for '{col}' with target '{request.target_column}' (smoothing={smoothing_factor})\nglobal_mean = df['{request.target_column}'].mean()\ngroup_sums = df.groupby('{col}')['{request.target_column}'].transform('sum')\ngroup_counts = df.groupby('{col}')['{request.target_column}'].transform('count')\ny_val = df['{request.target_column}']\ndf['{col}'] = (group_sums - y_val + {smoothing_factor} * global_mean) / (group_counts - 1 + {smoothing_factor})\ndf.loc[group_counts <= 1, '{col}'] = global_mean")
+
+        # --- TF-IDF Word Metrics Extraction ---
+        elif action == "tfidf_encode":
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            max_feats = 5
+            try:
+                if strat:
+                    max_feats = int(strat)
+            except Exception:
+                max_feats = 5
+            vec = TfidfVectorizer(max_features=max_feats, stop_words="english")
+            non_null_text = df[col].astype(str).fillna("")
+            tfidf_mat = vec.fit_transform(non_null_text).toarray()
+            words = vec.get_feature_names_out()
+            for j, word in enumerate(words):
+                new_col = f"tfidf_{col}_{word}"
+                df[new_col] = tfidf_mat[:, j]
+            df = df.drop(columns=[col])
+            
+            code_lines.append(f"# TF-IDF NLP feature extraction from '{col}' (max_features={max_feats})\nfrom sklearn.feature_extraction.text import TfidfVectorizer\nvec = TfidfVectorizer(max_features={max_feats}, stop_words='english')\ntfidf_mat = vec.fit_transform(df['{col}'].astype(str).fillna('')).toarray()\nfor j, word in enumerate(vec.get_feature_names_out()):\n    df[f'tfidf_{col}_{{word}}'] = tfidf_mat[:, j]\ndf = df.drop(columns=['{col}'])")
+
         # --- Frequency Encoding ---
         elif action == "frequency_encode":
             freqs = df[col].value_counts(normalize=True).to_dict()
@@ -2103,6 +2155,213 @@ async def deduplication_cosine_clusters(column: str, threshold: float = 0.8, x_d
     from backend.modules.deduplication import get_cosine_clusters
     clusters = get_cosine_clusters(df, column, threshold)
     return {"status": "success", "clusters": clusters}
+
+@app.get("/api/embeddings")
+async def get_embeddings(
+    algorithm: str = "pca",
+    dimensions: str = "2d",
+    target_column: Optional[str] = None,
+    x_dataset_id: Optional[str] = Header(None)
+):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+
+    numeric_cols = []
+    for col in df.columns:
+        if col == target_column:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]) and df[col].nunique() > 1:
+            numeric_cols.append(col)
+
+    if len(numeric_cols) < 2:
+        return {
+            "status": "bypassed",
+            "message": "Embeddings require at least 2 numerical features."
+        }
+
+    X = df[numeric_cols].apply(lambda x: x.fillna(x.median()))
+    valid_cols = [c for c in numeric_cols if X[c].std() > 0]
+    if len(valid_cols) < 2:
+        return {
+            "status": "bypassed",
+            "message": "Embeddings require at least 2 numerical features with non-zero variance."
+        }
+    X = X[valid_cols]
+
+    try:
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        n_components = 3 if dimensions == "3d" else 2
+        fallback_used = False
+        coords = None
+        explained_variance = None
+
+        if algorithm == "pca":
+            from sklearn.decomposition import PCA
+            pca = PCA(n_components=n_components, random_state=42)
+            coords = pca.fit_transform(X_scaled)
+            explained_variance = [float(v) for v in pca.explained_variance_ratio_]
+        elif algorithm == "umap":
+            try:
+                import umap
+                reducer = umap.UMAP(n_components=n_components, random_state=42)
+                coords = reducer.fit_transform(X_scaled)
+            except ImportError:
+                fallback_used = True
+                from sklearn.manifold import TSNE
+                perplexity = min(30, max(5, len(X_scaled) // 3))
+                tsne = TSNE(n_components=n_components, perplexity=perplexity, random_state=42)
+                coords = tsne.fit_transform(X_scaled)
+        else:
+            from sklearn.manifold import TSNE
+            perplexity = min(30, max(5, len(X_scaled) // 3))
+            tsne = TSNE(n_components=n_components, perplexity=perplexity, random_state=42)
+            coords = tsne.fit_transform(X_scaled)
+
+        sample_size = min(len(coords), 1000)
+        indices = np.arange(len(coords))
+        if len(coords) > 1000:
+            np.random.seed(42)
+            indices = np.random.choice(len(coords), size=1000, replace=False)
+
+        points = []
+        targets = []
+        has_target = target_column is not None and target_column in df.columns
+
+        for idx in indices:
+            pt = {
+                "x": float(coords[idx, 0]),
+                "y": float(coords[idx, 1])
+            }
+            if dimensions == "3d":
+                pt["z"] = float(coords[idx, 2])
+            points.append(pt)
+
+            if has_target:
+                val = df.iloc[idx][target_column]
+                targets.append(str(val) if pd.notnull(val) else "Missing")
+
+        return {
+            "status": "success",
+            "algorithm": algorithm,
+            "dimensions": dimensions,
+            "fallback_used": fallback_used,
+            "explained_variance": explained_variance,
+            "points": points,
+            "targets": targets,
+            "columns_used": valid_cols
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Embedding projection failed: {str(e)}"
+        }
+
+@app.get("/api/similarity/recommend")
+async def get_similarity_recommendations(
+    row_index: int,
+    top_k: int = 5,
+    x_dataset_id: Optional[str] = Header(None)
+):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+
+    if row_index < 0 or row_index >= len(df):
+        raise HTTPException(status_code=400, detail=f"Row index {row_index} out of bounds (0 to {len(df)-1}).")
+
+    numeric_cols = []
+    categorical_cols = []
+    target_column = state.get("target_column")
+
+    for col in df.columns:
+        if col == target_column:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]):
+            numeric_cols.append(col)
+        else:
+            categorical_cols.append(col)
+
+    if not numeric_cols and not categorical_cols:
+        raise HTTPException(status_code=400, detail="No features available for similarity calculation.")
+
+    try:
+        from sklearn.preprocessing import StandardScaler, OneHotEncoder
+        parts = []
+        
+        if len(numeric_cols) > 0:
+            X_num = df[numeric_cols].apply(lambda x: x.fillna(x.median()))
+            scaler = StandardScaler()
+            X_num_scaled = scaler.fit_transform(X_num)
+            parts.append(X_num_scaled)
+
+        if len(categorical_cols) > 0:
+            X_cat = df[categorical_cols].astype(str).fillna("Missing")
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
+            X_cat_encoded = encoder.fit_transform(X_cat)
+            parts.append(X_cat_encoded)
+
+        import numpy as np
+        X_processed = np.hstack(parts)
+
+        row_vec = X_processed[row_index].reshape(1, -1)
+        
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarities = cosine_similarity(X_processed, row_vec).ravel()
+
+        indices = np.argsort(similarities)[::-1]
+        
+        recommendations = []
+        for idx in indices:
+            if idx == row_index:
+                continue
+            sim_score = float(similarities[idx])
+            
+            row_data = df.iloc[idx].to_dict()
+            for k, v in row_data.items():
+                if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+                    row_data[k] = None
+                elif isinstance(v, (np.integer, np.floating)):
+                    row_data[k] = float(v)
+
+            recommendations.append({
+                "row_index": int(idx),
+                "similarity": sim_score,
+                "row_data": row_data
+            })
+
+            if len(recommendations) >= top_k:
+                break
+
+        selected_row_data = df.iloc[row_index].to_dict()
+        for k, v in selected_row_data.items():
+            if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+                selected_row_data[k] = None
+            elif isinstance(v, (np.integer, np.floating)):
+                selected_row_data[k] = float(v)
+
+        return {
+            "status": "success",
+            "selected_row_index": row_index,
+            "selected_row_data": selected_row_data,
+            "recommendations": recommendations
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Similarity recommendation failed: {str(e)}"
+        }
 
 os.makedirs("frontend", exist_ok=True)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")

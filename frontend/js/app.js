@@ -699,6 +699,7 @@
                 if (state.datasetInfo) {
                     e.preventDefault();
                     triggerRedo();
+                }
             }
         });
 
@@ -732,6 +733,7 @@
             el.btnRunHypTest.addEventListener('click', runHypothesisTestInCenter);
         }
         initDeduplicationListeners();
+        initFeatureFactoryListeners();
     }
 
     // Helper functions
@@ -761,6 +763,8 @@
             updateHypothesisFields();
         } else if (tabName === 'deduplication') {
             initDeduplicationUI();
+        } else if (tabName === 'feature-factory') {
+            initFeatureFactoryUI();
         }
     }
 
@@ -5237,6 +5241,441 @@
             `;
             submitBtn.classList.add('hidden');
         };
+    }
+
+    // ================= FEATURE FACTORY & EMBEDDINGS STUDIO =================
+
+    function initFeatureFactoryListeners() {
+        // Subtab clicking
+        document.querySelectorAll('#tab-feature-factory .subtab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const subtab = btn.getAttribute('data-sub-tab');
+                document.querySelectorAll('#tab-feature-factory .subtab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                document.querySelectorAll('#tab-feature-factory .subtab-pane').forEach(p => p.classList.add('hidden'));
+                document.getElementById(`subtab-pane-factory-${subtab}`).classList.remove('hidden');
+                
+                if (subtab === 'embed') {
+                    projectEmbeddings();
+                } else if (subtab === 'sim') {
+                    // Update Row Index boundaries
+                    if (state.datasetInfo) {
+                        const maxRowIdx = state.datasetInfo.n_rows - 1;
+                        document.getElementById('sim-row-index').setAttribute('max', maxRowIdx);
+                    }
+                }
+            });
+        });
+
+        // Similarity match slider change
+        const simKSlider = document.getElementById('sim-k-slider');
+        const simKVal = document.getElementById('sim-k-val');
+        if (simKSlider && simKVal) {
+            simKSlider.addEventListener('input', () => {
+                simKVal.innerText = simKSlider.value;
+            });
+        }
+
+        // Project button click
+        const embedBtn = document.getElementById('embed-project-btn');
+        if (embedBtn) {
+            embedBtn.addEventListener('click', projectEmbeddings);
+        }
+
+        // Similarity search button click
+        const simBtn = document.getElementById('sim-search-btn');
+        if (simBtn) {
+            simBtn.addEventListener('click', runSimilaritySearch);
+        }
+    }
+
+    function initFeatureFactoryUI() {
+        // Populate color legends select
+        const colorSelect = document.getElementById('embed-color-select');
+        if (colorSelect && state.datasetInfo) {
+            colorSelect.innerHTML = '<option value="">-- None (Uniform Color) --</option>';
+            const target = el.targetSelect.value;
+            if (target) {
+                colorSelect.innerHTML += `<option value="${target}" selected>Target: ${target}</option>`;
+            }
+            state.datasetInfo.columns.forEach(col => {
+                if (col !== target) {
+                    colorSelect.innerHTML += `<option value="${col}">${col}</option>`;
+                }
+            });
+        }
+
+        renderFeatureRecommendations();
+        renderFeatureRankings();
+    }
+
+    function renderFeatureRecommendations() {
+        const container = document.getElementById('factory-recs-container');
+        if (!container) return;
+
+        const ff = state.analysisResults?.results?.feature_factory;
+        if (!ff || !ff.recommendations || ff.recommendations.length === 0) {
+            container.innerHTML = `
+                <div class="text-muted" style="grid-column: 1/-1; text-align: center; padding: 40px;">
+                    No feature recommendations available for this dataset.
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = '';
+        ff.recommendations.forEach(rec => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.style.border = '1px solid var(--slate-700)';
+            card.style.backgroundColor = 'var(--slate-900)';
+            card.style.display = 'flex';
+            card.style.flexDirection = 'column';
+            card.style.justifyContent = 'space-between';
+
+            const badgeText = rec.type === 'skew' ? 'Skewed Distribution' : 'Ratio Interaction';
+            const badgeColor = rec.type === 'skew' ? 'var(--amber-500)' : 'var(--cyan-500)';
+
+            card.innerHTML = `
+                <div>
+                    <span class="badge" style="background-color: ${badgeColor}; color: #000; font-weight: bold; font-size: 10px; margin-bottom: 8px; display: inline-block;">${badgeText}</span>
+                    <h4 style="margin: 5px 0; color: #fff; font-size: 14px;">${rec.type === 'skew' ? rec.column : `${rec.column1} / ${rec.column2}`}</h4>
+                    <p style="font-size: 12px; color: var(--slate-300); margin: 8px 0;">${rec.message}</p>
+                </div>
+                <div style="margin-top: 15px;">
+                    <button class="btn btn-primary btn-sm apply-rec-btn" style="width: 100%; justify-content: center; font-size: 11px; padding: 6px 12px;">
+                        Apply Transformation
+                    </button>
+                </div>
+            `;
+
+            const applyBtn = card.querySelector('.apply-rec-btn');
+            applyBtn.addEventListener('click', () => {
+                showLoading("Applying recommendation...");
+                if (rec.type === 'skew') {
+                    state.wranglerSteps.push({
+                        column: rec.column,
+                        action: 'transform',
+                        strategy: rec.strategy
+                    });
+                } else if (rec.type === 'ratio') {
+                    const newColName = `${rec.column1}_to_${rec.column2}_ratio`;
+                    state.wranglerSteps.push({
+                        column: newColName,
+                        action: 'custom_formula',
+                        strategy: rec.strategy
+                    });
+                }
+                renderWranglerSteps();
+                executeWranglePipeline();
+            });
+
+            container.appendChild(card);
+        });
+    }
+
+    function renderFeatureRankings() {
+        const tbody = document.getElementById('factory-ranker-tbody');
+        if (!tbody) return;
+
+        const ff = state.analysisResults?.results?.feature_factory;
+        if (!ff || !ff.rankings || ff.rankings.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-muted" style="text-align: center; padding: 40px;">
+                        ${ff?.message || "Select a target variable and run audit to calculate rankings."}
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = '';
+        ff.rankings.forEach(row => {
+            const tr = document.createElement('tr');
+            
+            tr.innerHTML = `
+                <td><strong style="color: var(--slate-100);">${row.rank}</strong></td>
+                <td><span class="code" style="color: var(--cyan-400); font-weight: 600;">${row.column}</span></td>
+                <td>${row.variance_score.toFixed(4)}</td>
+                <td>${row.correlation_score.toFixed(4)}</td>
+                <td>${row.mi_score.toFixed(4)}</td>
+                <td>${row.rfe_rank}</td>
+                <td><span class="badge" style="background-color: var(--slate-800); color: var(--indigo-300); font-weight: 600;">${row.ensemble_rank.toFixed(2)}</span></td>
+                <td>
+                    <button class="btn btn-outline btn-sm drop-ranker-btn" style="padding: 4px 8px; font-size: 11px; color: var(--rose-400); border-color: rgba(244,63,94,0.2);">
+                        Drop Column
+                    </button>
+                </td>
+            `;
+
+            tr.querySelector('.drop-ranker-btn').addEventListener('click', () => {
+                showLoading("Queueing drop step...");
+                state.wranglerSteps.push({
+                    column: row.column,
+                    action: 'drop',
+                    strategy: null
+                });
+                renderWranglerSteps();
+                executeWranglePipeline();
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function projectEmbeddings() {
+        const algo = document.getElementById('embed-algo-select').value;
+        const dim = document.getElementById('embed-dim-select').value;
+        const colorCol = document.getElementById('embed-color-select').value;
+        const meta = document.getElementById('embed-chart-meta');
+        
+        meta.innerText = `Projecting using ${algo.toUpperCase()} (${dim.toUpperCase()}). Please wait...`;
+        
+        let url = `/api/embeddings?algorithm=${algo}&dimensions=${dim}`;
+        if (colorCol) {
+            url += `&target_column=${encodeURIComponent(colorCol)}`;
+        }
+
+        fetch(url, {
+            headers: {
+                'X-Dataset-Id': state.activeDatasetId
+            }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Embeddings query failed");
+            return res.json();
+        })
+        .then(data => {
+            if (data.status === 'bypassed') {
+                meta.innerText = data.message;
+                document.getElementById('embed-2d-canvas').classList.add('hidden');
+                document.getElementById('embed-3d-div').classList.add('hidden');
+                return;
+            }
+            if (data.status === 'error') {
+                meta.innerText = `Error: ${data.message}`;
+                return;
+            }
+
+            meta.innerText = `Projection complete using columns: ${data.columns_used.join(', ')}`;
+            
+            const badge = document.getElementById('embed-fallback-badge');
+            if (data.fallback_used) {
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+
+            if (dim === '2d') {
+                document.getElementById('embed-2d-canvas').classList.remove('hidden');
+                document.getElementById('embed-3d-div').classList.add('hidden');
+                renderEmbeddings2D(data);
+            } else {
+                document.getElementById('embed-2d-canvas').classList.add('hidden');
+                document.getElementById('embed-3d-div').classList.remove('hidden');
+                renderEmbeddings3D(data);
+            }
+        })
+        .catch(err => {
+            meta.innerText = `Error projecting embeddings: ${err.message}`;
+        });
+    }
+
+    function renderEmbeddings2D(data) {
+        destroyChart('embeddings2DChart');
+
+        const ctx = document.getElementById('embed-2d-canvas').getContext('2d');
+        let datasets = [];
+        
+        if (data.targets && data.targets.length > 0) {
+            const uniqueClasses = [...new Set(data.targets)];
+            const colorPalette = ['#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#ef4444', '#14b8a6'];
+            
+            uniqueClasses.forEach((cls, classIdx) => {
+                const classPoints = data.points.filter((_, idx) => data.targets[idx] === cls);
+                datasets.push({
+                    label: `${cls}`,
+                    data: classPoints.map(p => ({ x: p.x, y: p.y })),
+                    backgroundColor: colorPalette[classIdx % colorPalette.length],
+                    borderColor: 'transparent',
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                });
+            });
+        } else {
+            datasets.push({
+                label: 'Points',
+                data: data.points.map(p => ({ x: p.x, y: p.y })),
+                backgroundColor: '#3b82f6',
+                borderColor: 'transparent',
+                pointRadius: 4,
+                pointHoverRadius: 6
+            });
+        }
+
+        state.charts.embeddings2DChart = new Chart(ctx, {
+            type: 'scatter',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, tickcolor: '#94a3b8', ticks: { color: '#94a3b8' } },
+                    y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, tickcolor: '#94a3b8', ticks: { color: '#94a3b8' } }
+                },
+                plugins: {
+                    legend: {
+                        display: data.targets && data.targets.length > 0,
+                        labels: { color: '#f1f5f9', font: { size: 10 } }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderEmbeddings3D(data) {
+        const container = document.getElementById('embed-3d-div');
+        container.innerHTML = '';
+
+        const x = data.points.map(p => p.x);
+        const y = data.points.map(p => p.y);
+        const z = data.points.map(p => p.z);
+        
+        let trace = {
+            x: x,
+            y: y,
+            z: z,
+            mode: 'markers',
+            type: 'scatter3d',
+            marker: {
+                size: 4,
+                opacity: 0.8
+            }
+        };
+
+        if (data.targets && data.targets.length > 0) {
+            const uniqueClasses = [...new Set(data.targets)];
+            const classMapping = {};
+            uniqueClasses.forEach((cls, idx) => {
+                classMapping[cls] = idx;
+            });
+            
+            trace.marker.color = data.targets.map(t => classMapping[t]);
+            trace.marker.colorscale = 'Viridis';
+            trace.text = data.targets;
+            trace.hoverinfo = 'text+x+y+z';
+        } else {
+            trace.marker.color = '#3b82f6';
+            trace.hoverinfo = 'x+y+z';
+        }
+
+        const layout = {
+            margin: { l: 0, r: 0, b: 0, t: 0 },
+            scene: {
+                xaxis: { title: 'Comp 1', gridcolor: 'rgba(255,255,255,0.05)', backgroundcolor: '#0f172a', showbackground: true, tickfont: { color: '#94a3b8' } },
+                yaxis: { title: 'Comp 2', gridcolor: 'rgba(255,255,255,0.05)', backgroundcolor: '#0f172a', showbackground: true, tickfont: { color: '#94a3b8' } },
+                zaxis: { title: 'Comp 3', gridcolor: 'rgba(255,255,255,0.05)', backgroundcolor: '#0f172a', showbackground: true, tickfont: { color: '#94a3b8' } }
+            },
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent'
+        };
+
+        Plotly.newPlot(container, [trace], layout, { responsive: true, displayModeBar: false });
+    }
+
+    function runSimilaritySearch() {
+        const rowIdx = parseInt(document.getElementById('sim-row-index').value);
+        const topK = parseInt(document.getElementById('sim-k-slider').value);
+        const meta = document.getElementById('sim-results-meta');
+        const container = document.getElementById('sim-results-container');
+        
+        if (isNaN(rowIdx) || rowIdx < 0) {
+            showStatusMessage("Please enter a valid non-negative row index.", "error");
+            return;
+        }
+
+        meta.innerText = `Calculating similarities for row ${rowIdx}...`;
+        container.innerHTML = '<div class="text-muted" style="text-align:center; padding:40px;">Computing cosine distances...</div>';
+
+        fetch(`/api/similarity/recommend?row_index=${rowIdx}&top_k=${topK}`, {
+            headers: {
+                'X-Dataset-Id': state.activeDatasetId
+            }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Similarity search failed");
+            return res.json();
+        })
+        .then(data => {
+            if (data.status === 'error') {
+                meta.innerText = `Error: ${data.message}`;
+                container.innerHTML = `<div class="text-danger" style="text-align:center; padding:40px;">${data.message}</div>`;
+                return;
+            }
+
+            meta.innerText = `Found top ${data.recommendations.length} similar rows for query index ${data.selected_row_index}.`;
+            renderSimilarityResults(data);
+        })
+        .catch(err => {
+            meta.innerText = `Error: ${err.message}`;
+            container.innerHTML = `<div class="text-danger" style="text-align:center; padding:40px;">Failed to fetch similar records.</div>`;
+        });
+    }
+
+    function renderSimilarityResults(data) {
+        const container = document.getElementById('sim-results-container');
+        if (!container) return;
+
+        container.innerHTML = '';
+        const cols = Object.keys(data.selected_row_data);
+
+        data.recommendations.forEach((rec, recIdx) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.style.border = '1px solid var(--slate-700)';
+            card.style.marginBottom = '15px';
+            card.style.backgroundColor = 'var(--slate-900)';
+            
+            let diffRows = '';
+            cols.forEach(col => {
+                const queryVal = data.selected_row_data[col];
+                const recVal = rec.row_data[col];
+                const isDiff = queryVal !== recVal;
+                const highlightStyle = isDiff ? 'color: var(--amber-400); font-weight: 600;' : 'color: var(--slate-300);';
+                
+                diffRows += `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.02);">
+                        <td style="padding: 6px; font-weight: 500; font-size:11px; color: var(--slate-400);">${col}</td>
+                        <td style="padding: 6px; font-size:11px; color: var(--slate-400);">${queryVal !== null ? queryVal : '<em class="text-muted">null</em>'}</td>
+                        <td style="padding: 6px; font-size:11px; ${highlightStyle}">${recVal !== null ? recVal : '<em class="text-muted">null</em>'}</td>
+                    </tr>
+                `;
+            });
+
+            card.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--slate-700); padding-bottom: 8px; margin-bottom: 10px;">
+                    <span style="font-weight: 600; font-size: 13px; color: #fff;">Match #${recIdx + 1} (Row Index: ${rec.row_index})</span>
+                    <span class="badge" style="background-color: var(--emerald-950); color: var(--emerald-400); font-weight: bold;">Similarity: ${(rec.similarity * 100).toFixed(2)}%</span>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--slate-700);">
+                                <th style="padding: 6px; font-size:11px; color: var(--slate-200);">Feature</th>
+                                <th style="padding: 6px; font-size:11px; color: var(--slate-200);">Query Value (Row #${data.selected_row_index})</th>
+                                <th style="padding: 6px; font-size:11px; color: var(--slate-200);">Match Value (Row #${rec.row_index})</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${diffRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            container.appendChild(card);
+        });
     }
 
     // Trigger initialization on DOM Load

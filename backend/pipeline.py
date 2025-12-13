@@ -5,6 +5,58 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from scipy.stats import yeojohnson
 from sklearn.preprocessing import TargetEncoder
 
+class SmoothedLOOTargetEncoder(BaseEstimator, TransformerMixin):
+    """
+    Smoothed Leave-One-Out category target encoder.
+    Prevents target leakage during training by using leave-one-out target means,
+    and applies smoothed group means during inference.
+    """
+    def __init__(self, smoothing=10.0):
+        self.smoothing = smoothing
+        self.global_mean_ = 0.0
+        self.category_sums_ = {}
+        self.category_counts_ = {}
+
+    def fit(self, X, y):
+        y_arr = np.asarray(y)
+        self.global_mean_ = float(y_arr.mean()) if len(y_arr) > 0 else 0.0
+        col_vals = np.asarray(X).ravel()
+        
+        self.category_sums_ = {}
+        self.category_counts_ = {}
+        unique_cats = np.unique(col_vals)
+        for cat in unique_cats:
+            mask = (col_vals == cat)
+            self.category_sums_[cat] = float(y_arr[mask].sum())
+            self.category_counts_[cat] = int(mask.sum())
+        return self
+
+    def transform(self, X, y=None):
+        col_vals = np.asarray(X).ravel()
+        encoded = np.empty_like(col_vals, dtype=float)
+        
+        if y is not None and len(y) == len(col_vals):
+            # Training time LOO
+            y_arr = np.asarray(y)
+            for i, val in enumerate(col_vals):
+                sum_val = self.category_sums_.get(val, 0.0)
+                count_val = self.category_counts_.get(val, 0)
+                y_i = y_arr[i]
+                if count_val > 1:
+                    encoded[i] = (sum_val - y_i + self.smoothing * self.global_mean_) / (count_val - 1 + self.smoothing)
+                else:
+                    encoded[i] = self.global_mean_
+        else:
+            # Inference time smoothed mean
+            for i, val in enumerate(col_vals):
+                sum_val = self.category_sums_.get(val, 0.0)
+                count_val = self.category_counts_.get(val, 0)
+                if count_val > 0:
+                    encoded[i] = (sum_val + self.smoothing * self.global_mean_) / (count_val + self.smoothing)
+                else:
+                    encoded[i] = self.global_mean_
+        return encoded
+
 class CustomFormulaParser:
     """
     AST-based sandboxed parser that securely compiles and evaluates custom arithmetic expressions.
@@ -312,6 +364,42 @@ class AuraEDAPipeline(BaseEstimator, TransformerMixin):
                     params["target_encoder"] = te
                     X_temp[col] = te.transform(X_temp[[col]])
 
+            # --- Smoothed Leave-One-Out Target Encoding ---
+            elif action == "loo_target_encode":
+                if y is not None:
+                    smoothing_factor = 10.0
+                    try:
+                        if strat:
+                            smoothing_factor = float(strat)
+                    except Exception:
+                        smoothing_factor = 10.0
+                    te = SmoothedLOOTargetEncoder(smoothing=smoothing_factor)
+                    te.fit(X_temp[[col]], y)
+                    params["encoder"] = te
+                    X_temp[col] = te.transform(X_temp[[col]], y)
+
+            # --- TF-IDF Word Metrics Extraction ---
+            elif action == "tfidf_encode":
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                max_feats = 5
+                try:
+                    if strat:
+                        max_feats = int(strat)
+                except Exception:
+                    max_feats = 5
+                vec = TfidfVectorizer(max_features=max_feats, stop_words="english")
+                non_null_text = X_temp[col].astype(str).fillna("")
+                vec.fit(non_null_text)
+                params["vectorizer"] = vec
+                params["max_features"] = max_feats
+                tfidf_mat = vec.transform(non_null_text).toarray()
+                words = vec.get_feature_names_out()
+                params["words"] = words
+                for j, word in enumerate(words):
+                    new_col = f"tfidf_{col}_{word}"
+                    X_temp[new_col] = tfidf_mat[:, j]
+                X_temp = X_temp.drop(columns=[col], errors="ignore")
+
             # --- Frequency Encoding ---
             elif action == "frequency_encode":
                 freqs = X_temp[col].value_counts(normalize=True).to_dict()
@@ -467,6 +555,22 @@ class AuraEDAPipeline(BaseEstimator, TransformerMixin):
             elif action == "target_encode" and "target_encoder" in params:
                 te = params["target_encoder"]
                 X_out[col] = te.transform(X_out[[col]])
+
+            # --- Smoothed Leave-One-Out Target Encoding ---
+            elif action == "loo_target_encode" and "encoder" in params:
+                te = params["encoder"]
+                X_out[col] = te.transform(X_out[[col]])
+
+            # --- TF-IDF Word Metrics Extraction ---
+            elif action == "tfidf_encode" and "vectorizer" in params:
+                vec = params["vectorizer"]
+                words = params["words"]
+                non_null_text = X_out[col].astype(str).fillna("")
+                tfidf_mat = vec.transform(non_null_text).toarray()
+                for j, word in enumerate(words):
+                    new_col = f"tfidf_{col}_{word}"
+                    X_out[new_col] = tfidf_mat[:, j]
+                X_out = X_out.drop(columns=[col], errors="ignore")
 
             # --- Frequency Encoding ---
             elif action == "frequency_encode" and "frequencies" in params:

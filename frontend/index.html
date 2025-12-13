@@ -442,6 +442,10 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                     Importance & PCA
                                 </button>
+                                <button class="nav-item" data-tab="feature-factory">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+                                    Feature Factory & Embeddings
+                                </button>
                             </div>
                         </div>
 
@@ -1755,6 +1759,156 @@
 
                                     <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
                                         <button class="btn btn-primary hidden" id="cosine-merge-submit-btn">Apply Canonical Merges</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ================= TAB: FEATURE FACTORY & EMBEDDINGS ================= -->
+                    <div class="tab-content hidden" id="tab-feature-factory">
+                        <div class="section-title-box">
+                            <h2>Feature Factory & Embeddings Studio</h2>
+                            <p>Auto-generate interactions, evaluate ensemble feature selectors, project high-dimensional records into 2D/3D spaces, and find similar items.</p>
+                        </div>
+
+                        <!-- Sub-navigation Tabs -->
+                        <div class="subtabs-header" style="margin-bottom: 20px;">
+                            <button class="subtab-btn active" id="subtab-btn-factory-recs" data-sub-tab="factory-recs">Recommendations</button>
+                            <button class="subtab-btn" id="subtab-btn-factory-embed" data-sub-tab="factory-embed">Embeddings Explorer</button>
+                            <button class="subtab-btn" id="subtab-btn-factory-ranker" data-sub-tab="factory-ranker">Ensemble Ranker</button>
+                            <button class="subtab-btn" id="subtab-btn-factory-sim" data-sub-tab="factory-sim">Similarity Recommender</button>
+                        </div>
+
+                        <!-- Subtab: Recommendations -->
+                        <div class="subtab-pane" id="subtab-pane-factory-recs">
+                            <div class="card">
+                                <h3 class="card-title">Auto-Generated Feature Recommendations</h3>
+                                <p class="card-subtitle">Heuristics-driven suggestions based on distributions and pairwise relationships.</p>
+                                <div id="factory-recs-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; margin-top: 15px;">
+                                    <div class="text-muted" style="grid-column: 1/-1; text-align: center; padding: 40px;">
+                                        No recommendations computed. Upload a dataset to begin.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subtab: Embeddings Explorer -->
+                        <div class="subtab-pane hidden" id="subtab-pane-factory-embed">
+                            <div class="split-view">
+                                <!-- Control Panel -->
+                                <div class="card sidebar-card" style="width: 320px;">
+                                    <h3 class="card-title">Projection Settings</h3>
+                                    <p class="card-subtitle">Configure dimensions and dimensionality reduction algorithms.</p>
+                                    
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="embed-algo-select">Reduction Algorithm</label>
+                                        <select id="embed-algo-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+                                            <option value="pca">PCA (Principal Component Analysis)</option>
+                                            <option value="tsne">t-SNE (t-Distributed Stochastic Neighbor Embedding)</option>
+                                            <option value="umap">UMAP (Uniform Manifold Approximation)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="embed-dim-select">Target Dimensions</label>
+                                        <select id="embed-dim-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+                                            <option value="2d">2D Projection</option>
+                                            <option value="3d">3D Scatter Spinner</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="embed-color-select">Color Legend (Target)</label>
+                                        <select id="embed-color-select" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+                                            <!-- Dynamically filled with target and columns -->
+                                        </select>
+                                    </div>
+
+                                    <button class="btn btn-primary" id="embed-project-btn" style="width: 100%; justify-content: center; margin-top: 20px; background: linear-gradient(135deg, var(--cyan-500) 0%, var(--blue-600) 100%);">
+                                        Project Embeddings
+                                    </button>
+                                </div>
+
+                                <!-- Chart View Panel -->
+                                <div class="card flex-1">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <h3 class="card-title">Embedding Space Projection</h3>
+                                        <span id="embed-fallback-badge" class="badge badge-warning hidden" style="font-size: 11px;">UMAP not installed. Fell back to t-SNE.</span>
+                                    </div>
+                                    <p class="card-subtitle" id="embed-chart-meta">Renders up to 1,000 random samples in the projected feature space.</p>
+                                    
+                                    <div class="histogram-wrapper" style="height: 400px; display: flex; align-items: center; justify-content: center; position: relative;" id="embed-canvas-wrapper">
+                                        <!-- 2D Canvas -->
+                                        <canvas id="embed-2d-canvas" style="width: 100%; height: 100%;"></canvas>
+                                        <!-- 3D Div (Plotly) -->
+                                        <div id="embed-3d-div" class="hidden" style="width: 100%; height: 100%;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subtab: Ensemble Ranker -->
+                        <div class="subtab-pane hidden" id="subtab-pane-factory-ranker">
+                            <div class="card">
+                                <h3 class="card-title">Ensemble Feature Importance Ranks</h3>
+                                <p class="card-subtitle">Combines Variance (standardised), Correlation magnitude, Mutual Information, and Recursive Feature Elimination (RFE) into a consolidated rank list.</p>
+                                <div style="overflow-x: auto; margin-top: 15px;">
+                                    <table class="data-table" id="factory-ranker-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Rank</th>
+                                                <th>Feature Column</th>
+                                                <th>Variance Score</th>
+                                                <th>Corr vs Target</th>
+                                                <th>Mutual Info</th>
+                                                <th>RFE Selection Rank</th>
+                                                <th>Ensemble Score</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="factory-ranker-tbody">
+                                            <tr>
+                                                <td colspan="8" class="text-muted" style="text-align: center; padding: 40px;">Select a target variable and audit dataset to calculate ensemble feature importance ranks.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subtab: Similarity Recommender -->
+                        <div class="subtab-pane hidden" id="subtab-pane-factory-sim">
+                            <div class="split-view">
+                                <!-- Left Control Panel -->
+                                <div class="card sidebar-card" style="width: 320px;">
+                                    <h3 class="card-title">Recommendation Settings</h3>
+                                    <p class="card-subtitle">Select a baseline row and fetch top matches based on cosine similarity.</p>
+                                    
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="sim-row-index">Query Row Index</label>
+                                        <input type="number" id="sim-row-index" min="0" value="0" style="background-color: var(--slate-900); border: 1px solid var(--slate-700); color: var(--slate-100); padding: 8px; border-radius: 6px; font-size: 12px; width: 100%;">
+                                    </div>
+
+                                    <div class="form-group" style="margin-top: 15px;">
+                                        <label for="sim-k-slider">Number of Matches: <span id="sim-k-val" style="color: var(--emerald-400); font-weight: 600;">5</span></label>
+                                        <input type="range" id="sim-k-slider" min="1" max="10" step="1" value="5" style="width: 100%; accent-color: var(--emerald-500);">
+                                    </div>
+
+                                    <button class="btn btn-primary" id="sim-search-btn" style="width: 100%; justify-content: center; margin-top: 20px; background: linear-gradient(135deg, var(--emerald-500) 0%, var(--teal-600) 100%);">
+                                        Find Similar Rows
+                                    </button>
+                                </div>
+
+                                <!-- Right Comparison Panel -->
+                                <div class="card flex-1">
+                                    <h3 class="card-title">Cosine Similarity Matches</h3>
+                                    <p class="card-subtitle" id="sim-results-meta">Select a query index above to compute pairwise similarity.</p>
+                                    
+                                    <div id="sim-results-container" style="margin-top: 15px; max-height: 480px; overflow-y: auto;">
+                                        <div class="text-muted" style="text-align: center; padding: 60px 20px;">
+                                            No search executed. Enter a row index and click "Find Similar Rows".
+                                        </div>
                                     </div>
                                 </div>
                             </div>
