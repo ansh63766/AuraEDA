@@ -734,7 +734,9 @@
         }
         initDeduplicationListeners();
         initFeatureFactoryListeners();
+        initAutoMLListeners();
     }
+
 
     // Helper functions
     function switchTab(tabName) {
@@ -765,6 +767,8 @@
             initDeduplicationUI();
         } else if (tabName === 'feature-factory') {
             initFeatureFactoryUI();
+        } else if (tabName === 'automl-shap') {
+            initAutoMLUI();
         }
     }
 
@@ -5676,6 +5680,853 @@
             `;
             container.appendChild(card);
         });
+    }
+
+    // ================= AUTOML LEADERBOARD & SHAP EXPLAINERS =================
+
+    function initAutoMLListeners() {
+        // Subtab switching inside AutoML & SHAP
+        document.querySelectorAll('#tab-automl-shap .subtab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const subtab = btn.getAttribute('data-sub-tab');
+                document.querySelectorAll('#tab-automl-shap .subtab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                document.querySelectorAll('#tab-automl-shap .subtab-pane').forEach(p => p.classList.add('hidden'));
+                const targetPane = document.getElementById(`subtab-pane-automl-${subtab}`);
+                if (targetPane) targetPane.classList.remove('hidden');
+
+                if (subtab === 'shap-global') {
+                    loadGlobalSHAP();
+                } else if (subtab === 'shap-local') {
+                    if (state.datasetInfo) {
+                        const maxIdx = state.datasetInfo.n_rows - 1;
+                        const rowIdxInput = document.getElementById('shap-local-row-idx');
+                        if (rowIdxInput) {
+                            rowIdxInput.setAttribute('max', maxIdx);
+                        }
+                    }
+                }
+            });
+        });
+
+        // Split ratio slider
+        const splitSlider = document.getElementById('automl-split-slider');
+        const splitValSpan = document.getElementById('automl-split-val');
+        if (splitSlider && splitValSpan) {
+            splitSlider.addEventListener('input', () => {
+                splitValSpan.innerText = parseFloat(splitSlider.value).toFixed(2);
+            });
+        }
+
+        // Train button
+        const trainBtn = document.getElementById('automl-train-btn');
+        if (trainBtn) {
+            trainBtn.addEventListener('click', runAutoMLTraining);
+        }
+
+        // Live classification threshold slider
+        const thresholdSlider = document.getElementById('automl-threshold-slider');
+        const thresholdValSpan = document.getElementById('automl-threshold-val');
+        if (thresholdSlider) {
+            thresholdSlider.addEventListener('input', () => {
+                const threshold = parseFloat(thresholdSlider.value);
+                if (thresholdValSpan) {
+                    thresholdValSpan.innerText = threshold.toFixed(2);
+                }
+                updateLiveClassificationMetrics();
+            });
+        }
+
+        // Explain local button
+        const explainLocalBtn = document.getElementById('shap-local-search-btn');
+        if (explainLocalBtn) {
+            explainLocalBtn.addEventListener('click', explainLocalSHAPRecord);
+        }
+
+        // SHAP dependence column select
+        const shapDepSelect = document.getElementById('shap-dep-col-select');
+        if (shapDepSelect) {
+            shapDepSelect.addEventListener('change', renderSHAPDependencePlot);
+        }
+    }
+
+    function initAutoMLUI() {
+        const splitSlider = document.getElementById('automl-split-slider');
+        const splitValSpan = document.getElementById('automl-split-val');
+        if (splitSlider && splitValSpan) {
+            splitValSpan.innerText = parseFloat(splitSlider.value).toFixed(2);
+        }
+
+        if (state.automlResults) {
+            renderAutoMLResults(state.automlResults);
+        } else {
+            // Reset to empty message placeholder
+            const tableBody = document.getElementById('automl-leaderboard-tbody');
+            if (tableBody) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td class="text-muted" style="text-align: center; padding: 40px;">Click "Train AutoML Models" to execute model fitting.</td>
+                    </tr>
+                `;
+            }
+        }
+    }
+
+    function runAutoMLTraining() {
+        const target = el.targetSelect.value;
+        if (!target) {
+            showStatusMessage("Please select a target variable in the top bar before training AutoML.", "error");
+            return;
+        }
+
+        const splitSlider = document.getElementById('automl-split-slider');
+        const balancingSelect = document.getElementById('automl-balancing-select');
+        const splitRatio = splitSlider ? parseFloat(splitSlider.value) : 0.3;
+        const balancing = balancingSelect ? balancingSelect.value : "None";
+
+        showLoading("Training 8 AutoML Models concurrently...");
+
+        fetch('/api/automl/train', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Dataset-Id': state.activeDatasetId
+            },
+            body: JSON.stringify({
+                target_column: target,
+                split_ratio: splitRatio,
+                balancing: balancing
+            })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("AutoML training failed");
+            return res.json();
+        })
+        .then(data => {
+            hideLoading();
+            if (data.status === 'error') {
+                showStatusMessage(data.message, "error");
+                return;
+            }
+            state.automlResults = data;
+            state.shapResults = null; // reset shap cache since model trained anew
+            renderAutoMLResults(data);
+            showStatusMessage("AutoML training completed successfully!", "success");
+        })
+        .catch(err => {
+            hideLoading();
+            showStatusMessage(`Error during training: ${err.message}`, "error");
+        });
+    }
+
+    function renderAutoMLResults(results) {
+        // Set up active subtabs
+        const leaderBtn = document.getElementById('subtab-btn-automl-leader');
+        if (leaderBtn) {
+            document.querySelectorAll('#tab-automl-shap .subtab-btn').forEach(b => b.classList.remove('active'));
+            leaderBtn.classList.add('active');
+            
+            document.querySelectorAll('#tab-automl-shap .subtab-pane').forEach(p => p.classList.add('hidden'));
+            const leaderPane = document.getElementById('subtab-pane-automl-leader');
+            if (leaderPane) leaderPane.classList.remove('hidden');
+        }
+
+        // Hide/show classification vs regression buttons
+        const classBtn = document.getElementById('subtab-btn-automl-class');
+        const regBtn = document.getElementById('subtab-btn-automl-reg');
+        
+        if (results.is_classification) {
+            if (classBtn) classBtn.classList.remove('hidden');
+            if (regBtn) regBtn.classList.add('hidden');
+        } else {
+            if (classBtn) classBtn.classList.add('hidden');
+            if (regBtn) regBtn.classList.remove('hidden');
+        }
+
+        // Populate title
+        const titleEl = document.getElementById('automl-leaderboard-title');
+        if (titleEl) {
+            titleEl.innerText = `${results.is_classification ? 'Classification' : 'Regression'} Model Performance Leaderboard`;
+        }
+
+        // Render table
+        const thead = document.querySelector('#automl-leaderboard-table thead');
+        const tbody = document.getElementById('automl-leaderboard-tbody');
+        
+        if (thead && tbody) {
+            tbody.innerHTML = '';
+            if (results.is_classification) {
+                thead.innerHTML = `
+                    <tr style="border-bottom: 2px solid var(--slate-800);">
+                        <th style="padding: 10px; text-align: left;">Rank</th>
+                        <th style="padding: 10px; text-align: left;">Model Name</th>
+                        <th style="padding: 10px; text-align: left;">F1-Score (Macro)</th>
+                        <th style="padding: 10px; text-align: left;">Accuracy</th>
+                        <th style="padding: 10px; text-align: left;">Precision (Macro)</th>
+                        <th style="padding: 10px; text-align: left;">Recall (Macro)</th>
+                        <th style="padding: 10px; text-align: left;">AUC-ROC</th>
+                        <th style="padding: 10px; text-align: left;">Fit Time</th>
+                    </tr>
+                `;
+                
+                results.leaderboard.forEach((row, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid var(--slate-900)';
+                    const bestBadge = idx === 0 ? '<span class="badge" style="background-color: var(--emerald-950); color: var(--emerald-400); font-weight: bold; margin-left: 8px;">Best</span>' : '';
+                    tr.innerHTML = `
+                        <td style="padding: 10px; font-weight: 600; color: var(--slate-400);">${idx + 1}</td>
+                        <td style="padding: 10px; font-weight: 600; color: #fff;">${row.name}${bestBadge}</td>
+                        <td style="padding: 10px; font-weight: 700; color: var(--indigo-300);">${row.f1.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.accuracy.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.precision.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.recall.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.auc.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-400);">${row.fit_time.toFixed(3)}s</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                thead.innerHTML = `
+                    <tr style="border-bottom: 2px solid var(--slate-800);">
+                        <th style="padding: 10px; text-align: left;">Rank</th>
+                        <th style="padding: 10px; text-align: left;">Model Name</th>
+                        <th style="padding: 10px; text-align: left;">R-Squared</th>
+                        <th style="padding: 10px; text-align: left;">Adjusted R-Squared</th>
+                        <th style="padding: 10px; text-align: left;">MAE</th>
+                        <th style="padding: 10px; text-align: left;">RMSE</th>
+                        <th style="padding: 10px; text-align: left;">Fit Time</th>
+                    </tr>
+                `;
+                
+                results.leaderboard.forEach((row, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid var(--slate-900)';
+                    const bestBadge = idx === 0 ? '<span class="badge" style="background-color: var(--emerald-950); color: var(--emerald-400); font-weight: bold; margin-left: 8px;">Best</span>' : '';
+                    tr.innerHTML = `
+                        <td style="padding: 10px; font-weight: 600; color: var(--slate-400);">${idx + 1}</td>
+                        <td style="padding: 10px; font-weight: 600; color: #fff;">${row.name}${bestBadge}</td>
+                        <td style="padding: 10px; font-weight: 700; color: var(--indigo-300);">${row.r2.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.adjusted_r2.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.mae.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-200);">${row.rmse.toFixed(4)}</td>
+                        <td style="padding: 10px; color: var(--slate-400);">${row.fit_time.toFixed(3)}s</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+
+        // Render charts
+        if (results.is_classification) {
+            drawClassificationCharts(results.diagnostics);
+            
+            // Set threshold to 0.50 and trigger live update
+            const thresholdSlider = document.getElementById('automl-threshold-slider');
+            const thresholdValSpan = document.getElementById('automl-threshold-val');
+            if (thresholdSlider) {
+                thresholdSlider.value = 0.50;
+                if (thresholdValSpan) thresholdValSpan.innerText = "0.50";
+            }
+            updateLiveClassificationMetrics();
+        } else {
+            drawRegressionCharts(results.diagnostics);
+        }
+    }
+
+    function calculateROCPR(yTrue, probs) {
+        const thresholds = Array.from({length: 101}, (_, i) => i / 100);
+        const roc = [];
+        const pr = [];
+        
+        thresholds.forEach(t => {
+            let tp = 0, fp = 0, fn = 0, tn = 0;
+            for (let i = 0; i < yTrue.length; i++) {
+                const y = yTrue[i];
+                let p = 0.0;
+                if (Array.isArray(probs[i])) {
+                    p = probs[i].length > 1 ? probs[i][1] : probs[i][0];
+                } else {
+                    p = probs[i];
+                }
+                const pred = p >= t ? 1 : 0;
+                if (y === 1 && pred === 1) tp++;
+                else if (y === 0 && pred === 1) fp++;
+                else if (y === 1 && pred === 0) fn++;
+                else if (y === 0 && pred === 0) tn++;
+            }
+            const tpr = tp / (tp + fn || 1);
+            const fpr = fp / (fp + tn || 1);
+            const precision = tp / (tp + fp || 1);
+            const recall = tp / (tp + fn || 1);
+            
+            roc.push({ x: fpr, y: tpr });
+            pr.push({ x: recall, y: precision });
+        });
+        
+        roc.sort((a, b) => a.x - b.x);
+        pr.sort((a, b) => a.x - b.x);
+        return { roc, pr };
+    }
+
+    function drawClassificationCharts(diag) {
+        destroyChart('automlRocChart');
+        destroyChart('automlPrChart');
+        destroyChart('automlCalibChart');
+
+        const { y_true, probs } = diag.classification;
+        if (!y_true || !probs || probs.length === 0) return;
+
+        const { roc, pr } = calculateROCPR(y_true, probs);
+
+        // ROC
+        const ctxRoc = document.getElementById('automl-roc-chart').getContext('2d');
+        state.charts.automlRocChart = new Chart(ctxRoc, {
+            type: 'line',
+            data: {
+                datasets: [
+                    {
+                        label: 'ROC Curve',
+                        data: roc,
+                        borderColor: 'var(--cyan-500)',
+                        borderWidth: 2.5,
+                        fill: false,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Random Guess',
+                        data: [{x: 0, y: 0}, {x: 1, y: 1}],
+                        borderColor: 'rgba(255, 255, 255, 0.25)',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'linear', position: 'bottom', title: { display: true, text: 'False Positive Rate', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                    y: { type: 'linear', min: 0, max: 1, title: { display: true, text: 'True Positive Rate', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#f1f5f9' } }
+                }
+            }
+        });
+
+        // PR
+        const ctxPr = document.getElementById('automl-pr-chart').getContext('2d');
+        state.charts.automlPrChart = new Chart(ctxPr, {
+            type: 'line',
+            data: {
+                datasets: [
+                    {
+                        label: 'Precision-Recall Curve',
+                        data: pr,
+                        borderColor: 'var(--indigo-500)',
+                        borderWidth: 2.5,
+                        fill: false,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Recall', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                    y: { type: 'linear', min: 0, max: 1.05, title: { display: true, text: 'Precision', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#f1f5f9' } }
+                }
+            }
+        });
+
+        // Calibration
+        if (diag.calibration) {
+            const ctxCal = document.getElementById('automl-calib-chart').getContext('2d');
+            const calData = diag.calibration.pred_probs.map((p, idx) => ({ x: p, y: diag.calibration.true_probs[idx] }));
+            
+            // Sort by x
+            calData.sort((a, b) => a.x - b.x);
+
+            state.charts.automlCalibChart = new Chart(ctxCal, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Best Model Calibration',
+                            data: calData,
+                            borderColor: 'var(--amber-500)',
+                            backgroundColor: 'var(--amber-500)',
+                            borderWidth: 2,
+                            fill: false,
+                            pointRadius: 4
+                        },
+                        {
+                            label: 'Perfect Calibration',
+                            data: [{x: 0, y: 0}, {x: 1, y: 1}],
+                            borderColor: 'rgba(255, 255, 255, 0.25)',
+                            borderWidth: 1.5,
+                            borderDash: [5, 5],
+                            fill: false,
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { type: 'linear', position: 'bottom', title: { display: true, text: 'Predicted Probability', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                        y: { type: 'linear', min: 0, max: 1, title: { display: true, text: 'Actual Fraction of Positives', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+    }
+
+    function drawRegressionCharts(diag) {
+        destroyChart('automlResidualsChart');
+        destroyChart('automlCooksChart');
+
+        const { fitted_values, residuals } = diag.regression;
+        if (!fitted_values || !residuals) return;
+
+        // Residuals vs Fitted
+        const ctxRes = document.getElementById('automl-residuals-chart').getContext('2d');
+        state.charts.automlResidualsChart = new Chart(ctxRes, {
+            type: 'scatter',
+            data: {
+                datasets: [
+                    {
+                        label: 'Residuals',
+                        data: fitted_values.map((v, i) => ({ x: v, y: residuals[i] })),
+                        backgroundColor: 'rgba(99, 102, 241, 0.6)',
+                        borderColor: 'transparent',
+                        pointRadius: 3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'linear', title: { display: true, text: 'Fitted Values', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                    y: { type: 'linear', title: { display: true, text: 'Residuals', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+
+        // Cook's Distance
+        if (diag.cooks_distance) {
+            const N = diag.cooks_distance.length;
+            const threshold = 4.0 / N;
+            const ctxCooks = document.getElementById('automl-cooks-chart').getContext('2d');
+            state.charts.automlCooksChart = new Chart(ctxCooks, {
+                type: 'bar',
+                data: {
+                    labels: Array.from({length: N}, (_, i) => i),
+                    datasets: [
+                        {
+                            label: "Cook's Distance",
+                            data: diag.cooks_distance,
+                            backgroundColor: diag.cooks_distance.map(d => d > threshold ? 'rgba(239, 68, 68, 0.8)' : 'rgba(16, 185, 129, 0.8)'),
+                            borderColor: 'transparent'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { display: false },
+                        y: { type: 'linear', title: { display: true, text: 'Distance', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+    }
+
+    function updateLiveClassificationMetrics() {
+        if (!state.automlResults || !state.automlResults.is_classification) return;
+        const diag = state.automlResults.diagnostics;
+        if (!diag || !diag.classification) return;
+
+        const { y_true, probs } = diag.classification;
+        if (!y_true || !probs || probs.length === 0) return;
+
+        const thresholdSlider = document.getElementById('automl-threshold-slider');
+        const t = thresholdSlider ? parseFloat(thresholdSlider.value) : 0.50;
+
+        let tp = 0, fp = 0, fn = 0, tn = 0;
+        const N = y_true.length;
+
+        for (let i = 0; i < N; i++) {
+            const y = y_true[i];
+            let p = 0.0;
+            if (Array.isArray(probs[i])) {
+                p = probs[i].length > 1 ? probs[i][1] : probs[i][0];
+            } else {
+                p = probs[i];
+            }
+
+            const pred = p >= t ? 1 : 0;
+            if (y === 1 && pred === 1) tp++;
+            else if (y === 0 && pred === 1) fp++;
+            else if (y === 1 && pred === 0) fn++;
+            else if (y === 0 && pred === 0) tn++;
+        }
+
+        const acc = (tp + tn) / N;
+        const prec = tp / (tp + fp) || 0.0;
+        const rec = tp / (tp + fn) || 0.0;
+        const f1 = (2 * prec * rec) / (prec + rec) || 0.0;
+
+        // Update Confusion Matrix Grid
+        const tnVal = document.getElementById('cm-tn-val');
+        const fpVal = document.getElementById('cm-fp-val');
+        const fnVal = document.getElementById('cm-fn-val');
+        const tpVal = document.getElementById('cm-tp-val');
+
+        if (tnVal) tnVal.innerText = tn;
+        if (fpVal) fpVal.innerText = fp;
+        if (fnVal) fnVal.innerText = fn;
+        if (tpVal) tpVal.innerText = tp;
+
+        // Update live stats text
+        const accText = document.getElementById('live-acc-val');
+        const precText = document.getElementById('live-prec-val');
+        const recText = document.getElementById('live-rec-val');
+        const f1Text = document.getElementById('live-f1-val');
+
+        if (accText) accText.innerText = acc.toFixed(4);
+        if (precText) precText.innerText = prec.toFixed(4);
+        if (recText) recText.innerText = rec.toFixed(4);
+        if (f1Text) f1Text.innerText = f1.toFixed(4);
+    }
+
+    function loadGlobalSHAP() {
+        const target = el.targetSelect.value;
+        if (!target) return;
+
+        if (state.shapResults) {
+            renderSHAPGlobal();
+            return;
+        }
+
+        const beeswarmContainer = document.getElementById('shap-beeswarm-chart').parentNode;
+        const originalHTML = beeswarmContainer.innerHTML;
+        beeswarmContainer.innerHTML = '<div class="text-muted" style="text-align: center; padding: 80px 20px;">Computing surrogate SHAP attributions via Ridge model...</div>';
+
+        fetch(`/api/shap/explain?target_column=${encodeURIComponent(target)}`, {
+            headers: {
+                'X-Dataset-Id': state.activeDatasetId
+            }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Failed to compute SHAP values");
+            return res.json();
+        })
+        .then(data => {
+            beeswarmContainer.innerHTML = originalHTML; // restore canvas
+            if (data.status === 'error') {
+                showStatusMessage(data.message, "error");
+                return;
+            }
+            state.shapResults = data;
+            renderSHAPGlobal();
+        })
+        .catch(err => {
+            beeswarmContainer.innerHTML = originalHTML;
+            showStatusMessage(`Error loading SHAP explainers: ${err.message}`, "error");
+        });
+    }
+
+    function getShapColor(normalizedVal) {
+        const hue = (1.0 - normalizedVal) * 220;
+        return `hsla(${hue}, 100%, 60%, 0.75)`;
+    }
+
+    function renderSHAPGlobal() {
+        const attributions = state.shapResults.attributions;
+        if (!attributions || attributions.length === 0) return;
+
+        // Populate dependence select
+        const depSelect = document.getElementById('shap-dep-col-select');
+        if (depSelect) {
+            depSelect.innerHTML = '';
+            attributions.forEach(attr => {
+                const opt = document.createElement('option');
+                opt.value = attr.feature;
+                opt.innerText = attr.feature;
+                depSelect.appendChild(opt);
+            });
+        }
+
+        // Draw Beeswarm Chart
+        const pts = [];
+        const colors = [];
+        const M = attributions.length;
+        attributions.forEach((attr, idx) => {
+            const yBase = M - 1 - idx;
+            const n = attr.shap_values.length;
+            for (let i = 0; i < n; i++) {
+                const xVal = attr.shap_values[i];
+                const fVal = attr.feature_values[i]; // normalized [0, 1]
+                const yVal = yBase + (Math.random() - 0.5) * 0.45; // Jitter
+                pts.push({ x: xVal, y: yVal });
+                colors.push(getShapColor(fVal));
+            }
+        });
+
+        destroyChart('shapBeeswarmChart');
+        const ctxBeeswarm = document.getElementById('shap-beeswarm-chart').getContext('2d');
+        state.charts.shapBeeswarmChart = new Chart(ctxBeeswarm, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'SHAP Attributions',
+                    data: pts,
+                    backgroundColor: colors,
+                    borderColor: 'transparent',
+                    pointRadius: 3.5,
+                    pointHoverRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: 'SHAP Value (Impact on Model Output)', color: '#94a3b8' },
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: {
+                        min: -0.5,
+                        max: attributions.length - 0.5,
+                        ticks: {
+                            stepSize: 1,
+                            callback: function(value) {
+                                if (Number.isInteger(value) && value >= 0 && value < attributions.length) {
+                                    return attributions[attributions.length - 1 - value].feature;
+                                }
+                                return null;
+                            },
+                            color: '#94a3b8'
+                        },
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const yVal = context.raw.y;
+                                const featIdx = attributions.length - 1 - Math.round(yVal);
+                                const featName = attributions[featIdx]?.feature || 'Feature';
+                                return `${featName}: SHAP = ${context.raw.x.toFixed(4)}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Draw default dependence plot
+        renderSHAPDependencePlot();
+    }
+
+    function renderSHAPDependencePlot() {
+        if (!state.shapResults) return;
+        const depSelect = document.getElementById('shap-dep-col-select');
+        if (!depSelect) return;
+        const featName = depSelect.value;
+        if (!featName) return;
+
+        const { raw_features_data, shap_values_data, interaction_mapping } = state.shapResults;
+        const interactFeatName = interaction_mapping[featName];
+
+        const xData = raw_features_data[featName];
+        const yData = shap_values_data[featName];
+        const colorData = raw_features_data[interactFeatName] || xData;
+
+        const minVal = Math.min(...colorData);
+        const maxVal = Math.max(...colorData);
+        const range = maxVal - minVal || 1.0;
+        
+        const pts = [];
+        const colors = [];
+        for (let i = 0; i < xData.length; i++) {
+            pts.push({ x: xData[i], y: yData[i] });
+            const normVal = (colorData[i] - minVal) / range;
+            colors.push(getShapColor(normVal));
+        }
+
+        destroyChart('shapDependenceChart');
+        const ctxDep = document.getElementById('shap-dependence-chart').getContext('2d');
+        
+        const metaDiv = document.getElementById('shap-dep-interact-meta');
+        if (metaDiv) {
+            metaDiv.innerHTML = `Colored by strongest interaction feature: <strong>${interactFeatName}</strong> (Blue=Low, Red=High)`;
+        }
+
+        state.charts.shapDependenceChart = new Chart(ctxDep, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: featName,
+                    data: pts,
+                    backgroundColor: colors,
+                    borderColor: 'transparent',
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: `${featName} (Feature Value)`, color: '#94a3b8' },
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: {
+                        title: { display: true, text: 'SHAP Value (Impact)', color: '#94a3b8' },
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#94a3b8' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+    }
+
+    function explainLocalSHAPRecord() {
+        const target = el.targetSelect.value;
+        if (!target) {
+            showStatusMessage("Please select a target variable first.", "error");
+            return;
+        }
+
+        const rowIdxInput = document.getElementById('shap-local-row-idx');
+        const rowIdx = rowIdxInput ? parseInt(rowIdxInput.value) : 0;
+        if (isNaN(rowIdx) || rowIdx < 0) {
+            showStatusMessage("Please enter a valid non-negative row index.", "error");
+            return;
+        }
+
+        const container = document.getElementById('shap-local-waterfall-container');
+        container.innerHTML = '<div class="text-muted" style="text-align: center; padding: 60px 20px;">Decomposing prediction for row index ' + rowIdx + '...</div>';
+
+        fetch(`/api/shap/explain?target_column=${encodeURIComponent(target)}&row_index=${rowIdx}`, {
+            headers: {
+                'X-Dataset-Id': state.activeDatasetId
+            }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Failed to calculate local SHAP explainers");
+            return res.json();
+        })
+        .then(data => {
+            if (data.status === 'error') {
+                container.innerHTML = `<div class="text-danger" style="text-align: center; padding: 60px 20px;">${data.message}</div>`;
+                return;
+            }
+            if (data.waterfall) {
+                renderLocalWaterfall(data.waterfall);
+            } else {
+                container.innerHTML = '<div class="text-muted" style="text-align: center; padding: 60px 20px;">No waterfall data returned.</div>';
+            }
+        })
+        .catch(err => {
+            container.innerHTML = `<div class="text-danger" style="text-align: center; padding: 60px 20px;">Error: ${err.message}</div>`;
+        });
+    }
+
+    function renderLocalWaterfall(waterfall) {
+        const container = document.getElementById('shap-local-waterfall-container');
+        if (!container) return;
+        container.innerHTML = '';
+        
+        const statsHeader = document.createElement('div');
+        statsHeader.style = 'display: flex; gap: 20px; margin-bottom: 20px; justify-content: center;';
+        statsHeader.innerHTML = `
+            <div style="background-color: var(--slate-900); border: 1px solid var(--slate-800); border-radius: 8px; padding: 12px; min-width: 140px; text-align: center;">
+                <div style="font-size: 11px; color: var(--slate-400);">Base Value (E[f(X)])</div>
+                <div style="font-size: 18px; font-weight: 700; color: var(--slate-300); margin-top: 4px;">${waterfall.base_value.toFixed(4)}</div>
+            </div>
+            <div style="background-color: var(--slate-900); border: 1px solid var(--slate-800); border-radius: 8px; padding: 12px; min-width: 140px; text-align: center;">
+                <div style="font-size: 11px; color: var(--slate-400);">Predicted Value (f(X))</div>
+                <div style="font-size: 18px; font-weight: 700; color: var(--indigo-400); margin-top: 4px;">${waterfall.prediction.toFixed(4)}</div>
+            </div>
+        `;
+        container.appendChild(statsHeader);
+
+        const listContainer = document.createElement('div');
+        listContainer.style = 'display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--slate-800); padding: 16px; border-radius: 10px; background-color: var(--slate-950);';
+        
+        listContainer.innerHTML += `
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--slate-400); border-bottom: 1px solid var(--slate-900); padding-bottom: 6px;">
+                <span>Expected Model Output (Base Value)</span>
+                <strong>${waterfall.base_value.toFixed(4)}</strong>
+            </div>
+        `;
+
+        const maxVal = Math.max(...waterfall.features.map(f => Math.abs(f.shap_val)), 1e-5);
+
+        waterfall.features.forEach(f => {
+            const isPos = f.shap_val >= 0;
+            const width = (Math.abs(f.shap_val) / maxVal) * 45; 
+            const barStyle = isPos 
+                ? `left: 50%; width: ${width}%; background: linear-gradient(90deg, var(--rose-500), var(--rose-600)); border-radius: 0 4px 4px 0;`
+                : `left: ${50 - width}%; width: ${width}%; background: linear-gradient(90deg, var(--cyan-600), var(--cyan-500)); border-radius: 4px 0 0 4px;`;
+            
+            const labelColor = isPos ? 'var(--rose-400)' : 'var(--cyan-400)';
+            const sign = isPos ? '+' : '';
+
+            listContainer.innerHTML += `
+                <div style="display: flex; align-items: center; padding: 6px 0; min-height: 40px; border-bottom: 1px solid rgba(255,255,255,0.01);">
+                    <div style="width: 150px; font-size: 11px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; color: var(--slate-200);" title="${f.feature} = ${f.raw_val}">
+                        <strong>${f.feature}</strong> <span style="color: var(--slate-500); font-size: 10px;">(${f.raw_val})</span>
+                    </div>
+                    <div style="flex: 1; position: relative; height: 16px; background-color: var(--slate-900); border-radius: 4px; overflow: hidden;">
+                        <div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background-color: var(--slate-700); z-index: 1;"></div>
+                        <div style="position: absolute; top: 0; bottom: 0; z-index: 2; transition: all 0.3s ease; ${barStyle}"></div>
+                    </div>
+                    <div style="width: 70px; text-align: right; font-size: 11px; font-weight: 600; color: ${labelColor};">
+                        ${sign}${f.shap_val.toFixed(4)}
+                    </div>
+                </div>
+            `;
+        });
+
+        listContainer.innerHTML += `
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--indigo-300); border-top: 1px solid var(--slate-900); padding-top: 8px; margin-top: 4px;">
+                <span>Final Model Prediction (f(X))</span>
+                <strong>${waterfall.prediction.toFixed(4)}</strong>
+            </div>
+        `;
+        
+        container.appendChild(listContainer);
     }
 
     // Trigger initialization on DOM Load

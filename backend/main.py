@@ -2363,6 +2363,68 @@ async def get_similarity_recommendations(
             "message": f"Similarity recommendation failed: {str(e)}"
         }
 
+class AutoMLTrainRequest(BaseModel):
+    target_column: str
+    split_ratio: float = 0.3
+    balancing: str = "None"
+
+@app.post("/api/automl/train")
+async def automl_train(request: AutoMLTrainRequest, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+
+    from backend.modules.automl_shap import AutoMLShapModule
+    module = AutoMLShapModule()
+    
+    results = module.run_automl_training(
+        df, 
+        request.target_column, 
+        request.split_ratio, 
+        request.balancing
+    )
+    
+    if results["status"] == "success":
+        state["automl_results"] = results
+        
+    return results
+
+@app.get("/api/shap/explain")
+async def shap_explain(
+    target_column: str,
+    row_index: Optional[int] = None,
+    x_dataset_id: Optional[str] = Header(None)
+):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+
+    automl_res = state.get("automl_results")
+    if not automl_res or automl_res.get("status") != "success":
+        from backend.modules.automl_shap import AutoMLShapModule
+        module = AutoMLShapModule()
+        automl_res = module.run_automl_training(df, target_column)
+        if automl_res["status"] == "success":
+            state["automl_results"] = automl_res
+        else:
+            raise HTTPException(status_code=400, detail="Could not calculate SHAP values: AutoML training failed.")
+
+    from backend.modules.automl_shap import compute_surrogate_shap
+    results = compute_surrogate_shap(
+        df,
+        target_column,
+        automl_res["preprocessed_features"],
+        automl_res["best_model_coef"],
+        row_index
+    )
+    return results
+
 os.makedirs("frontend", exist_ok=True)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
