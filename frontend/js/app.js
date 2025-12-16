@@ -336,7 +336,27 @@
         hypResPvalue: document.getElementById('hyp-res-pvalue'),
         hypResInterpretation: document.getElementById('hyp-res-interpretation'),
         hypResPower: document.getElementById('hyp-res-power'),
-        hypPlotlyChart: document.getElementById('hyp-plotly-chart')
+        hypPlotlyChart: document.getElementById('hyp-plotly-chart'),
+
+        // Phase 8 & 9 elements
+        whatifSlidersContainer: document.getElementById('whatif-sliders-container'),
+        whatifPredictionLabel: document.getElementById('whatif-prediction-label'),
+        whatifProbRingContainer: document.getElementById('whatif-prob-ring-container'),
+        fairnessProtectedSelect: document.getElementById('fairness-protected-select'),
+        fairnessAuditTable: document.getElementById('fairness-audit-table'),
+        fairnessAuditTbody: document.getElementById('fairness-audit-tbody'),
+        forecastDateSelect: document.getElementById('forecast-date-select'),
+        forecastTargetSelect: document.getElementById('forecast-target-select'),
+        forecastStepsInput: document.getElementById('forecast-steps-input'),
+        btnRunForecast: document.getElementById('btn-run-forecast'),
+        forecastChartContainer: document.getElementById('forecast-chart-container'),
+        gmmClustersInput: document.getElementById('gmm-clusters-input'),
+        btnRunGmm: document.getElementById('btn-run-gmm'),
+        gmmMetricsRow: document.getElementById('gmm-metrics-row'),
+        gmmAicVal: document.getElementById('gmm-aic-val'),
+        gmmBicVal: document.getElementById('gmm-bic-val'),
+        gmmProfilesContainer: document.getElementById('gmm-profiles-container'),
+        exportPptxBtn: document.getElementById('export-pptx-btn')
     };
 
     // Initialize Event Listeners
@@ -446,6 +466,27 @@
             const target = el.targetSelect.value;
             window.open(`/api/export/pdf?target_column=${encodeURIComponent(target)}`, '_blank');
         });
+        if (el.exportPptxBtn) {
+            el.exportPptxBtn.addEventListener('click', () => {
+                const target = el.targetSelect.value;
+                window.open(`/api/export/pptx?target_column=${encodeURIComponent(target)}`, '_blank');
+            });
+        }
+
+        // What-If & Bias listeners
+        if (el.fairnessProtectedSelect) {
+            el.fairnessProtectedSelect.addEventListener('change', () => {
+                runFairnessAudit();
+            });
+        }
+
+        // Forecast & GMM listeners
+        if (el.btnRunForecast) {
+            el.btnRunForecast.addEventListener('click', runForecasts);
+        }
+        if (el.btnRunGmm) {
+            el.btnRunGmm.addEventListener('click', runGmmClustering);
+        }
 
         // Logo return
         el.logoBtn.addEventListener('click', () => {
@@ -769,6 +810,10 @@
             initFeatureFactoryUI();
         } else if (tabName === 'automl-shap') {
             initAutoMLUI();
+        } else if (tabName === 'whatif-bias') {
+            initWhatIfBiasUI();
+        } else if (tabName === 'forecast-gmm') {
+            initForecastGmmUI();
         }
     }
 
@@ -1452,17 +1497,8 @@
         // Advanced Tab sub-panes setup
         renderAdvancedPanes();
 
-        // Generate dynamic copilot welcome message & suggested chips
-        if (state.datasetInfo && results) {
-            generateWelcomeMessageBrief(
-                state.datasetInfo.filename, 
-                results.dataset_summary.n_rows, 
-                results.dataset_summary.n_columns, 
-                results.results.alerts.alerts, 
-                el.targetSelect.value
-            );
-            generateChips(results.results.alerts.alerts);
-        }
+        // Load chat history (restoring saved logs on active workspace swaps/renders)
+        loadChatHistory();
     }
 
     // Canvas Draw missingness matrix
@@ -6529,6 +6565,584 @@
         container.appendChild(listContainer);
     }
 
-    // Trigger initialization on DOM Load
+    // ================== PHASE 8 & 9 IMPLEMENTATIONS ==================
+
+    function loadChatHistory() {
+        if (!state.activeDatasetId) return;
+        
+        fetch('/api/chat/history', {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.chat_history && data.chat_history.length > 0) {
+                state.chatHistory = data.chat_history;
+                renderChatHistory();
+            } else {
+                const results = state.analysisResults;
+                if (state.datasetInfo && results) {
+                    generateWelcomeMessageBrief(
+                        state.datasetInfo.filename, 
+                        results.dataset_summary.n_rows, 
+                        results.dataset_summary.n_columns, 
+                        results.results.alerts.alerts, 
+                        el.targetSelect.value
+                    );
+                    generateChips(results.results.alerts.alerts);
+                }
+            }
+        })
+        .catch(err => {
+            console.error("Failed to load chat history:", err);
+        });
+    }
+
+    function renderChatHistory() {
+        el.chatMessagesArea.innerHTML = '';
+        state.chatHistory.forEach(msg => {
+            const isUser = msg.role === 'user';
+            const div = document.createElement('div');
+            div.className = isUser ? 'msg msg-user' : 'msg msg-agent';
+            if (!isUser) {
+                div.style = 'max-height: 400px; overflow-y: auto;';
+                let formattedReply = msg.content;
+                const jsonRegex = /```json\s*([\s\S]*?)\s*```/g;
+                let actionPayload = null;
+                formattedReply = formattedReply.replace(jsonRegex, (matchStr, p1) => {
+                    try {
+                        const parsed = JSON.parse(p1);
+                        if (parsed.column || Array.isArray(parsed) || parsed.action) {
+                            actionPayload = p1;
+                            return `<div class="wrangler-action-json hidden" style="display:none;">${p1}</div>`;
+                        }
+                    } catch(e) {}
+                    return matchStr;
+                });
+                
+                formattedReply = formattedReply.replace(/```python\s*([\s\S]*?)\s*```/g, '<pre class="code-block python-code">$1</pre>');
+                formattedReply = formattedReply.replace(/```\s*([\s\S]*?)\s*```/g, '<pre class="code-block">$1</pre>');
+                formattedReply = formattedReply.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+                formattedReply = formattedReply.replace(/\n/g, '<br>');
+
+                let buttonHtml = '';
+                if (actionPayload) {
+                    const escapedPayload = actionPayload.replace(/"/g, '&quot;');
+                    buttonHtml = `<button class="apply-wrangler-btn" style="margin-top:10px; display:block;" data-action="${escapedPayload}">Apply in Wrangler ▶</button>`;
+                }
+
+                const actionsHtml = `
+                    <div class="chat-actions" style="margin-top:8px; display:flex; gap:10px; align-items:center; opacity:0.85; border-top: 1px solid var(--slate-800); padding-top:6px; margin-top:8px;">
+                        <button class="chat-action-btn thumbs-up" style="background:transparent; border:none; color:var(--slate-400); cursor:pointer; font-size:12px;" onclick="this.style.color='var(--emerald-400)';">👍</button>
+                        <button class="chat-action-btn thumbs-down" style="background:transparent; border:none; color:var(--slate-400); cursor:pointer; font-size:12px;" onclick="this.style.color='var(--rose-400)';">👎</button>
+                        <button class="chat-action-btn copy-btn" style="background:transparent; border:none; color:var(--slate-400); cursor:pointer; font-size:11px; display:inline-flex; align-items:center; gap:3px;">📋 Copy</button>
+                        <button class="chat-action-btn save-btn" style="background:transparent; border:none; color:var(--slate-400); cursor:pointer; font-size:11px; display:inline-flex; align-items:center; gap:3px;">💾 Save to Report</button>
+                    </div>
+                `;
+                div.innerHTML = `<p>${formattedReply}</p>${buttonHtml}${actionsHtml}`;
+            } else {
+                div.innerHTML = `<p>${msg.content}</p>`;
+            }
+            el.chatMessagesArea.appendChild(div);
+        });
+        el.chatMessagesArea.scrollTop = el.chatMessagesArea.scrollHeight;
+
+        const results = state.analysisResults;
+        if (results && results.results && results.results.alerts) {
+            generateChips(results.results.alerts.alerts);
+        }
+    }
+
+    function initWhatIfBiasUI() {
+        if (!state.automlResults) {
+            el.whatifSlidersContainer.innerHTML = `
+                <div class="text-muted" style="text-align: center; padding: 40px 10px;">
+                    Train an AutoML model first under the <strong>Model Prep</strong> tab to enable the prediction simulator.
+                </div>
+            `;
+            el.whatifPredictionLabel.innerText = "No model trained";
+            el.whatifProbRingContainer.innerHTML = '';
+            el.fairnessAuditTbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; color: var(--slate-400); padding: 40px;">Train a model and select a protected variable to run the fairness audit.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        const meta = state.automlResults.preprocessing_meta;
+        if (!meta || Object.keys(meta).length === 0) {
+            el.whatifSlidersContainer.innerHTML = `<div class="text-muted" style="text-align: center;">No valid features mapped in model preprocessing metadata.</div>`;
+            return;
+        }
+
+        // Render features sliders and selectors
+        el.whatifSlidersContainer.innerHTML = '';
+        Object.entries(meta).forEach(([col, colMeta]) => {
+            const formGrp = document.createElement('div');
+            formGrp.className = 'form-group';
+            formGrp.style = 'background-color: var(--slate-950); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--slate-900);';
+            
+            const labelRow = document.createElement('div');
+            labelRow.style = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;';
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.style = 'font-size: 11px; font-weight: 600; color: var(--slate-300); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 200px;';
+            nameSpan.innerText = col;
+            labelRow.appendChild(nameSpan);
+
+            if (colMeta.type === 'numeric') {
+                const valSpan = document.createElement('span');
+                valSpan.className = 'whatif-val-indicator';
+                valSpan.style = 'font-size: 11px; font-weight: 700; color: var(--cyan-400);';
+                valSpan.innerText = colMeta.median.toFixed(2);
+                labelRow.appendChild(valSpan);
+                formGrp.appendChild(labelRow);
+
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.className = 'whatif-feature-input';
+                slider.setAttribute('data-col', col);
+                slider.setAttribute('data-type', 'numeric');
+                slider.min = colMeta.min;
+                slider.max = colMeta.max;
+                slider.step = (colMeta.max - colMeta.min) / 100 || 0.01;
+                slider.value = colMeta.median;
+                slider.style = 'width: 100%;';
+                
+                slider.addEventListener('input', () => {
+                    valSpan.innerText = parseFloat(slider.value).toFixed(2);
+                    runWhatIfPrediction();
+                });
+                
+                formGrp.appendChild(slider);
+            } else {
+                formGrp.appendChild(labelRow);
+                const select = document.createElement('select');
+                select.className = 'whatif-feature-input';
+                select.setAttribute('data-col', col);
+                select.setAttribute('data-type', 'categorical');
+                select.style = 'background-color: var(--slate-900); border: 1px solid var(--slate-700); color: #fff; padding: 6px; border-radius: 6px; font-size: 11px; width: 100%;';
+                
+                colMeta.categories.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.innerText = cat;
+                    select.appendChild(opt);
+                });
+                
+                select.addEventListener('change', runWhatIfPrediction);
+                formGrp.appendChild(select);
+            }
+            
+            el.whatifSlidersContainer.appendChild(formGrp);
+        });
+
+        // Setup protected dropdown values
+        el.fairnessProtectedSelect.innerHTML = '<option value="">-- Choose Protected Attribute --</option>';
+        if (state.datasetInfo && state.datasetInfo.columns) {
+            state.datasetInfo.columns.forEach(col => {
+                // Protected attributes are usually categories or low cardinality numeric values
+                const opt = document.createElement('option');
+                opt.value = col;
+                opt.innerText = col;
+                el.fairnessProtectedSelect.appendChild(opt);
+            });
+        }
+
+        // Try pre-selecting common protected columns
+        const potentialProtected = ['sex', 'gender', 'pclass', 'race', 'age', 'sex_male', 'sex_female'];
+        for (let name of potentialProtected) {
+            const found = Array.from(el.fairnessProtectedSelect.options).find(o => o.value.toLowerCase() === name);
+            if (found) {
+                el.fairnessProtectedSelect.value = found.value;
+                break;
+            }
+        }
+
+        runWhatIfPrediction();
+        runFairnessAudit();
+    }
+
+    function runWhatIfPrediction() {
+        if (!state.automlResults) return;
+        
+        const features = {};
+        document.querySelectorAll('.whatif-feature-input').forEach(input => {
+            const col = input.getAttribute('data-col');
+            const type = input.getAttribute('data-type');
+            if (type === 'numeric') {
+                features[col] = parseFloat(input.value);
+            } else {
+                features[col] = input.value;
+            }
+        });
+
+        fetch('/api/automl/predict', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Dataset-Id': state.activeDatasetId
+            },
+            body: JSON.stringify({ features })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                el.whatifPredictionLabel.innerText = 'Prediction Error';
+                el.whatifPredictionLabel.style.color = 'var(--rose-400)';
+                return;
+            }
+            
+            const isClass = state.automlResults.is_classification;
+            if (isClass) {
+                const label = data.predicted_class_label || data.prediction;
+                el.whatifPredictionLabel.innerText = `Class: ${label}`;
+                el.whatifPredictionLabel.style.color = 'var(--cyan-400)';
+
+                if (data.probabilities) {
+                    const prob = Math.max(...data.probabilities);
+                    const pct = Math.round(prob * 100);
+                    // Draw a radial ring
+                    el.whatifProbRingContainer.innerHTML = `
+                        <svg viewBox="0 0 36 36" style="width:100%; height:100%; transform: rotate(-90deg);">
+                            <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--slate-800)" stroke-width="3" />
+                            <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--cyan-500)" stroke-width="3" stroke-dasharray="${pct}, 100" />
+                        </svg>
+                        <div style="position: absolute; font-size: 11px; font-weight: 700; color: #fff;">${pct}%</div>
+                    `;
+                } else {
+                    el.whatifProbRingContainer.innerHTML = '';
+                }
+            } else {
+                el.whatifPredictionLabel.innerText = `Value: ${data.prediction.toFixed(4)}`;
+                el.whatifPredictionLabel.style.color = 'var(--violet-400)';
+                el.whatifProbRingContainer.innerHTML = '';
+            }
+        })
+        .catch(err => {
+            el.whatifPredictionLabel.innerText = `Error: ${err.message}`;
+            el.whatifPredictionLabel.style.color = 'var(--rose-400)';
+        });
+    }
+
+    function runFairnessAudit() {
+        const target = el.targetSelect.value;
+        const protectedAttr = el.fairnessProtectedSelect.value;
+        
+        if (!state.automlResults || !target || !protectedAttr) {
+            el.fairnessAuditTbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; color: var(--slate-400); padding: 40px;">Select a protected variable in the dropdown to calculate demographic metrics.</td>
+                </tr>
+            `;
+            return;
+        }
+
+        el.fairnessAuditTbody.innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align: center; color: var(--slate-400); padding: 40px;">Running demographic fairness audit calculations...</td>
+            </tr>
+        `;
+
+        fetch(`/api/fairness/audit?target_column=${encodeURIComponent(target)}&protected_attribute=${encodeURIComponent(protectedAttr)}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                el.fairnessAuditTbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-danger" style="text-align: center; padding: 40px;">Error: ${data.message}</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            el.fairnessAuditTbody.innerHTML = '';
+            data.audit.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid var(--slate-900)';
+                
+                const isPriv = row.is_privileged ? ' <span style="font-size:10px; color:var(--indigo-400); font-weight:700;">(Privileged)</span>' : '';
+                const dirVal = row.disparate_impact_ratio.toFixed(3);
+                
+                let badgeStyle = '';
+                if (row.color === 'green') {
+                    badgeStyle = 'background-color: var(--emerald-950); color: var(--emerald-400); border: 1px solid var(--emerald-800);';
+                } else if (row.color === 'orange') {
+                    badgeStyle = 'background-color: rgba(245, 158, 11, 0.1); color: var(--amber-400); border: 1px solid rgba(245, 158, 11, 0.2);';
+                } else {
+                    badgeStyle = 'background-color: rgba(239, 68, 68, 0.1); color: var(--rose-400); border: 1px solid rgba(239, 68, 68, 0.2);';
+                }
+
+                const badge = `<span class="badge" style="font-size:10px; font-weight:700; ${badgeStyle}">${row.status}</span>`;
+
+                tr.innerHTML = `
+                    <td style="padding: 12px 10px; font-weight: 600; color: #fff;">${row.group}${isPriv}</td>
+                    <td style="padding: 12px 10px;">${row.size.toLocaleString()}</td>
+                    <td style="padding: 12px 10px; font-weight: 700; color: var(--slate-200);">${(row.selection_rate * 100).toFixed(1)}%</td>
+                    <td style="padding: 12px 10px; font-weight: 700; color: ${row.color === 'green' ? 'var(--emerald-400)' : (row.color === 'orange' ? 'var(--amber-400)' : 'var(--rose-400)')};">${dirVal}</td>
+                    <td style="padding: 12px 10px;">${row.demographic_parity_diff.toFixed(3)}</td>
+                    <td style="padding: 12px 10px; font-size:11px; color: var(--slate-400);">TPR: ${row.equalized_odds_tpr_diff.toFixed(3)}<br>FPR: ${row.equalized_odds_fpr_diff.toFixed(3)}</td>
+                    <td style="padding: 12px 10px;">${badge}</td>
+                `;
+                el.fairnessAuditTbody.appendChild(tr);
+            });
+        })
+        .catch(err => {
+            el.fairnessAuditTbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-danger" style="text-align: center; padding: 40px;">Error: ${err.message}</td>
+                </tr>
+            `;
+        });
+    }
+
+    function initForecastGmmUI() {
+        if (!state.datasetInfo) return;
+
+        el.forecastDateSelect.innerHTML = '<option value="">-- Select Date --</option>';
+        el.forecastTargetSelect.innerHTML = '<option value="">-- Select Target --</option>';
+
+        state.datasetInfo.columns.forEach(col => {
+            const opt = document.createElement('option');
+            opt.value = col;
+            opt.innerText = col;
+            el.forecastDateSelect.appendChild(opt.cloneNode(true));
+            el.forecastTargetSelect.appendChild(opt.cloneNode(true));
+        });
+
+        // Try pre-selecting datetime/date signatures
+        const dtypeKeys = Object.keys(state.datasetInfo.dtypes);
+        for (let col of dtypeKeys) {
+            const dtype = state.datasetInfo.dtypes[col].toLowerCase();
+            if (dtype.includes('date') || dtype.includes('time') || col.toLowerCase().includes('date') || col.toLowerCase().includes('time')) {
+                el.forecastDateSelect.value = col;
+                break;
+            }
+        }
+
+        // Pre-select target column if set in top bar
+        if (el.targetSelect.value) {
+            el.forecastTargetSelect.value = el.targetSelect.value;
+        } else {
+            // Pick a numeric column
+            for (let col of dtypeKeys) {
+                const dtype = state.datasetInfo.dtypes[col].toLowerCase();
+                if ((dtype.includes('int') || dtype.includes('float')) && col !== el.forecastDateSelect.value) {
+                    el.forecastTargetSelect.value = col;
+                    break;
+                }
+            }
+        }
+    }
+
+    function runForecasts() {
+        const dateCol = el.forecastDateSelect.value;
+        const targetCol = el.forecastTargetSelect.value;
+        const steps = parseInt(el.forecastStepsInput.value) || 30;
+
+        if (!dateCol || !targetCol) {
+            showStatusMessage("Please select both Date and Target columns before forecasting.", "error");
+            return;
+        }
+
+        el.forecastChartContainer.innerHTML = `
+            <div class="loader-content" style="text-align: center; padding: 100px 20px;">
+                <div class="spinner" style="margin: 0 auto 15px;"></div>
+                <h3>Running Forecast Grid Search...</h3>
+                <p class="text-muted" style="font-size:12px;">Fitting ARIMA models and Fourier seasonals via Ridge regression</p>
+            </div>
+        `;
+
+        fetch(`/api/forecast/time-series?date_column=${encodeURIComponent(dateCol)}&target_column=${encodeURIComponent(targetCol)}&steps=${steps}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                el.forecastChartContainer.innerHTML = `<div class="text-danger" style="text-align: center; padding: 100px 20px;">Error: ${data.message}</div>`;
+                return;
+            }
+
+            el.forecastChartContainer.innerHTML = '';
+            
+            // Build Plotly lines
+            const traceHistory = {
+                x: data.history_dates,
+                y: data.history_values,
+                mode: 'lines',
+                name: 'History',
+                line: { color: '#64748b', width: 2 } // Slate 500
+            };
+
+            const traceArima = {
+                x: data.future_dates,
+                y: data.arima_forecast,
+                mode: 'lines+markers',
+                name: data.arima_params_label,
+                line: { color: '#ec4899', width: 2, dash: 'dash' } // Pink 500
+            };
+
+            const traceProphet = {
+                x: data.future_dates,
+                y: data.prophet_forecast,
+                mode: 'lines',
+                name: 'Fourier Seasonals (Prophet)',
+                line: { color: '#6366f1', width: 2.5 } // Indigo 500
+            };
+
+            const traceProphetConf = {
+                x: [...data.future_dates, ...[...data.future_dates].reverse()],
+                y: [...data.prophet_upper, ...[...data.prophet_lower].reverse()],
+                fill: 'toself',
+                fillcolor: 'rgba(99, 102, 241, 0.15)',
+                line: { color: 'transparent' },
+                name: 'Prophet 95% Confidence Band',
+                showlegend: true
+            };
+
+            const layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                margin: { l: 50, r: 20, t: 30, b: 40 },
+                font: { family: 'Outfit, sans-serif', color: '#94a3b8' },
+                xaxis: {
+                    gridcolor: '#1e293b',
+                    zerolinecolor: '#1e293b',
+                    tickfont: { size: 10 }
+                },
+                yaxis: {
+                    gridcolor: '#1e293b',
+                    zerolinecolor: '#1e293b',
+                    tickfont: { size: 10 }
+                },
+                legend: {
+                    orientation: 'h',
+                    yanchor: 'bottom',
+                    y: 1.02,
+                    xanchor: 'right',
+                    x: 1,
+                    font: { size: 11 }
+                }
+            };
+
+            Plotly.newPlot(el.forecastChartContainer, [traceHistory, traceProphetConf, traceProphet, traceArima], layout, { responsive: true, displayModeBar: false });
+        })
+        .catch(err => {
+            el.forecastChartContainer.innerHTML = `<div class="text-danger" style="text-align: center; padding: 100px 20px;">Error: ${err.message}</div>`;
+        });
+    }
+
+    function runGmmClustering() {
+        const K = parseInt(el.gmmClustersInput.value) || 3;
+        
+        el.gmmProfilesContainer.innerHTML = `
+            <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px;">
+                <div class="spinner" style="margin: 0 auto 15px;"></div>
+                <h3>Standardizing features & running Expectation-Maximization...</h3>
+            </div>
+        `;
+        el.gmmMetricsRow.classList.add('hidden');
+
+        fetch(`/api/clustering/gmm?num_clusters=${K}`, {
+            headers: { 'X-Dataset-Id': state.activeDatasetId }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'error') {
+                el.gmmProfilesContainer.innerHTML = `<div class="text-danger" style="grid-column: 1/-1; text-align: center; padding: 40px 20px;">Error: ${data.message}</div>`;
+                return;
+            }
+
+            el.gmmMetricsRow.classList.remove('hidden');
+            el.gmmAicVal.innerText = data.aic.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            el.gmmBicVal.innerText = data.bic.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+            el.gmmProfilesContainer.innerHTML = '';
+            
+            data.profiles.forEach(p => {
+                const card = document.createElement('div');
+                card.className = 'card profile-card';
+                card.style = 'background-color: var(--slate-950); border: 1px solid var(--slate-900); padding: 16px; border-radius: 12px; transition: transform 0.2s;';
+                
+                const pct = (p.proportion * 100).toFixed(1);
+                
+                card.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--slate-900); padding-bottom: 8px; margin-bottom: 12px;">
+                        <h4 style="margin:0; font-family:var(--font-display); font-size:14px; color:#fff;">Cluster #${p.cluster_index + 1}</h4>
+                        <span class="badge badge-success" style="font-size:10px; font-weight:700;">${p.size.toLocaleString()} rows (${pct}%)</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        ${Object.entries(p.means).map(([col, mean]) => `
+                            <div style="display:flex; justify-content:space-between; font-size:11px; align-items:center;">
+                                <span style="color:var(--slate-400); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:160px;" title="${col}">${col}</span>
+                                <strong style="color:var(--slate-200);">${mean.toLocaleString(undefined, { maximumFractionDigits: 4 })}</strong>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                
+                // Add hover transform micro-animation
+                card.addEventListener('mouseenter', () => { card.style.transform = 'translateY(-2px)'; });
+                card.addEventListener('mouseleave', () => { card.style.transform = 'translateY(0)'; });
+
+                el.gmmProfilesContainer.appendChild(card);
+            });
+        })
+        .catch(err => {
+            el.gmmProfilesContainer.innerHTML = `<div class="text-danger" style="grid-column: 1/-1; text-align: center; padding: 40px 20px;">Error: ${err.message}</div>`;
+        });
+    }
+
+    // Plotly right-click sticky annotations
+    document.addEventListener('contextmenu', function(e) {
+        const plotlyContainer = e.target.closest('.js-plotly-plot');
+        if (plotlyContainer) {
+            e.preventDefault();
+            
+            const rect = plotlyContainer.getBoundingClientRect();
+            const xClick = e.clientX - rect.left;
+            const yClick = e.clientY - rect.top;
+            
+            const noteText = prompt("Enter text annotation for this chart coordinates:");
+            if (noteText === null || noteText.trim() === "") return;
+            
+            const xPaper = xClick / rect.width;
+            const yPaper = 1 - (yClick / rect.height);
+            
+            const newAnnotation = {
+                x: xPaper,
+                y: yPaper,
+                xref: 'paper',
+                yref: 'paper',
+                text: noteText,
+                showarrow: true,
+                arrowhead: 2,
+                arrowsize: 1,
+                arrowwidth: 2,
+                arrowcolor: '#6366f1',
+                ax: 0,
+                ay: -30,
+                font: {
+                    family: 'Arial',
+                    size: 12,
+                    color: '#f1f5f9'
+                },
+                bgcolor: '#0f172a',
+                bordercolor: '#475569',
+                borderwidth: 1,
+                borderpad: 4,
+                opacity: 0.9
+            };
+            
+            const currentLayout = plotlyContainer.layout || {};
+            const annotations = currentLayout.annotations || [];
+            annotations.push(newAnnotation);
+            
+            Plotly.relayout(plotlyContainer, { annotations: annotations });
+            showStatusMessage("Sticky annotation added successfully!", "success");
+        }
+    });
     document.addEventListener('DOMContentLoaded', init);
 })();

@@ -1792,6 +1792,15 @@ async def run_chat(request: ChatRequest, x_dataset_id: Optional[str] = Header(No
     state["chat_history"] = history + [{"role": "assistant", "content": response_text}]
     return {"response": response_text}
 
+@app.get("/api/chat/history")
+async def get_chat_history(x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    return {"chat_history": state.get("chat_history", [])}
+
 @app.get("/api/export/pdf")
 async def export_pdf(target_column: Optional[str] = None, x_dataset_id: Optional[str] = Header(None)):
     global DATASETS, ACTIVE_DATASET_ID
@@ -2388,6 +2397,32 @@ async def automl_train(request: AutoMLTrainRequest, x_dataset_id: Optional[str] 
     )
     
     if results["status"] == "success":
+        state["best_model_obj"] = results.pop("_best_model_obj", None)
+        state["scaler_obj"] = results.pop("_scaler_obj", None)
+        state["preprocessing_meta"] = results.pop("_preprocessing_meta", None)
+        
+        # Build client-friendly serializable metadata for What-If sliders
+        client_meta = {}
+        if state["preprocessing_meta"]:
+            for col, item in state["preprocessing_meta"].items():
+                if item["type"] == "numeric":
+                    col_min = float(df[col].min()) if not df[col].isnull().all() else 0.0
+                    col_max = float(df[col].max()) if not df[col].isnull().all() else 100.0
+                    # Handle equal min and max to prevent slider bugs
+                    if col_min == col_max:
+                        col_max = col_min + 1.0
+                    client_meta[col] = {
+                        "type": "numeric",
+                        "min": col_min,
+                        "max": col_max,
+                        "median": item["median"]
+                    }
+                else:
+                    client_meta[col] = {
+                        "type": "categorical",
+                        "categories": item["categories"]
+                    }
+        results["preprocessing_meta"] = client_meta
         state["automl_results"] = results
         
     return results
@@ -2424,6 +2459,106 @@ async def shap_explain(
         row_index
     )
     return results
+
+class WhatIfPredictRequest(BaseModel):
+    features: Dict[str, Any]
+
+@app.post("/api/automl/predict")
+async def automl_predict(request: WhatIfPredictRequest, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    
+    from backend.modules.whatif_bias import WhatIfBiasModule
+    module = WhatIfBiasModule()
+    
+    result = module.run_whatif_prediction(state, request.features)
+    return result
+
+@app.get("/api/fairness/audit")
+async def fairness_audit(
+    target_column: str,
+    protected_attribute: str,
+    x_dataset_id: Optional[str] = Header(None)
+):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.whatif_bias import WhatIfBiasModule
+    module = WhatIfBiasModule()
+    
+    result = module.run_fairness_audit(df, target_column, protected_attribute, state)
+    return result
+
+@app.get("/api/forecast/time-series")
+async def time_series_forecast(
+    date_column: str,
+    target_column: str,
+    steps: int = 30,
+    x_dataset_id: Optional[str] = Header(None)
+):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.forecast_clustering import ForecastClusteringModule
+    module = ForecastClusteringModule()
+    
+    result = module.run_time_series_forecast(df, date_column, target_column, steps)
+    return result
+
+@app.get("/api/clustering/gmm")
+async def gmm_clustering(
+    num_clusters: int = 3,
+    x_dataset_id: Optional[str] = Header(None)
+):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    df = state["df"]
+    
+    from backend.modules.forecast_clustering import ForecastClusteringModule
+    module = ForecastClusteringModule()
+    
+    result = module.run_gmm_clustering(df, num_clusters)
+    return result
+
+@app.get("/api/export/pptx")
+async def export_pptx(target_column: Optional[str] = None, x_dataset_id: Optional[str] = Header(None)):
+    global DATASETS, ACTIVE_DATASET_ID
+    ds_id = x_dataset_id or ACTIVE_DATASET_ID
+    if not ds_id or ds_id not in DATASETS:
+        raise HTTPException(status_code=400, detail="No dataset loaded.")
+    state = DATASETS[ds_id]
+    if state["analysis"] is None:
+        raise HTTPException(status_code=400, detail="Please execute dataset analysis before exporting slides.")
+
+    temp_dir = tempfile.mkdtemp()
+    pptx_filename = f"{os.path.splitext(state['filename'])[0]}_presentation.pptx"
+    pptx_path = os.path.join(temp_dir, pptx_filename)
+
+    try:
+        from backend.slides_exporter import SlidesExporterModule
+        module = SlidesExporterModule()
+        module.build_pptx_report(state["analysis"], pptx_path, target_column)
+        return FileResponse(
+            pptx_path,
+            filename=pptx_filename,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PowerPoint generation failed: {str(e)}")
 
 os.makedirs("frontend", exist_ok=True)
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
