@@ -56,17 +56,25 @@ class AutoMLShapModule:
         X = pd.DataFrame()
         categorical_mask = []
         feature_cols = []
+        preprocessing_meta = {}
         for col in X_raw.columns:
             if X_raw[col].isnull().all() or X_raw[col].nunique() <= 1:
                 continue
             feature_cols.append(col)
             if pd.api.types.is_numeric_dtype(X_raw[col]):
-                X[col] = X_raw[col].fillna(X_raw[col].median()).astype(float)
+                median_val = float(X_raw[col].median()) if not X_raw[col].isnull().all() else 0.0
+                X[col] = X_raw[col].fillna(median_val).astype(float)
                 categorical_mask.append(False)
+                preprocessing_meta[col] = {"type": "numeric", "median": median_val}
             else:
                 le = LabelEncoder()
                 X[col] = le.fit_transform(X_raw[col].astype(str).fillna("Missing")).astype(float)
                 categorical_mask.append(True)
+                preprocessing_meta[col] = {
+                    "type": "categorical",
+                    "categories": [str(c) for c in le.classes_],
+                    "encoder": le
+                }
 
         if len(feature_cols) == 0:
             return {"status": "error", "message": "No valid predictive features found."}
@@ -261,7 +269,12 @@ class AutoMLShapModule:
             # Return preprocessed columns and data for SHAP computation
             "preprocessed_features": X.columns.tolist(),
             "X_train_mean": [float(v) for v in X_train.mean().values],
-            "best_model_coef": self._approximate_coefficients(best_model, X_train_scaled, y_train, is_classification)
+            "best_model_coef": self._approximate_coefficients(best_model, X_train_scaled, y_train, is_classification),
+            
+            # Internal objects to cache in state
+            "_best_model_obj": best_model,
+            "_scaler_obj": scaler,
+            "_preprocessing_meta": preprocessing_meta
         }
 
     def _get_estimators(self, is_classification: bool, balancing: str) -> Dict[str, Any]:
