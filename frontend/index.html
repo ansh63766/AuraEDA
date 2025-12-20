@@ -22,16 +22,78 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 <body>
+    <!-- Particle Constellation Backdrop Canvas -->
+    <canvas id="data-constellations-canvas"></canvas>
+
+    <!-- Scroll Progress Bar -->
+    <div class="scroll-progress-bar"></div>
+
+    <!-- Custom Cursor Follower -->
+    <div id="cursor-follower" class="cursor-follower">
+        <div class="cursor-dot"></div>
+        <div class="cursor-ring"></div>
+        <span class="cursor-label"></span>
+    </div>
+
     <!-- App Container -->
     <div id="app" class="initial-mode">
         
         <!-- ================= UPLOAD SCREEN ================= -->
         <section id="upload-screen" class="screen">
-            <div class="glow-bg"></div>
-            <div class="upload-container">
-                <div class="brand">
-                    <span class="logo-dot"></span>
-                    <h2>AuraEDA</h2>
+            <div class="upload-grid-wrapper">
+                <!-- Left: Hero intro panel -->
+                <div class="hero-intro-panel">
+                    <!-- Floating Bubbles / Social Proof Chips -->
+                    <div class="floating-chips-container" id="floating-chips-container"></div>
+                    
+                    <div class="hero-brand">
+                        <span class="hero-logo-dot"></span>
+                        <h2>AuraEDA v3.0</h2>
+                    </div>
+                    
+                    <!-- Typewriter / blur-to-sharp A·U·R·A -->
+                    <div class="aura-title-reveal">
+                        <span class="letter">A</span>
+                        <span class="letter">U</span>
+                        <span class="letter">R</span>
+                        <span class="letter">A</span>
+                    </div>
+                    
+                    <h1 class="hero-heading">Next-Gen Tabular<br><span class="gradient-text"><span class="morphing-word" id="morphing-word">ANALYZE</span> Engine</span></h1>
+                    <p class="hero-tagline">Experience real-time model auditing, What-If prediction simulators, and interactive data wrangling in a premium local sandbox.</p>
+                    
+                    <!-- Flowing mathematical mini-chart -->
+                    <div class="mini-chart-container">
+                        <svg class="mini-chart-svg" viewBox="0 0 400 150">
+                            <path class="chart-line-1" d="" fill="none" stroke="#00F5FF" stroke-width="2.5" />
+                            <path class="chart-line-2" d="" fill="none" stroke="#7B2FFF" stroke-width="1.5" stroke-dasharray="4,4" />
+                            <g class="chart-dots"></g>
+                        </svg>
+                    </div>
+
+                    <div class="hero-features-list">
+                        <div class="hero-feature-item">
+                            <span class="feature-num">01</span>
+                            <div>
+                                <h4>Multi-Source Ingest</h4>
+                                <p>SQL databases, REST APIs, Excel sheet loaders, and Parquet formats.</p>
+                            </div>
+                        </div>
+                        <div class="hero-feature-item">
+                            <span class="feature-num">02</span>
+                            <div>
+                                <h4>Parallel AutoML</h4>
+                                <p>Compare 8 algorithms with Platt calibration and SHAP explainers.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Upload panel container -->
+                <div class="upload-container">
+                    <div class="brand">
+                        <span class="logo-dot"></span>
+                        <h2>AuraEDA</h2>
                 </div>
                 <h1>Automated Data Ingest & Quality Audit</h1>
                 <p class="subtitle">Import tabular records from local files, sample galleries, databases, APIs, or clipboards to trigger statistical diagnostic profiles.</p>
@@ -169,6 +231,7 @@
 
                 <div id="upload-status" class="status-msg hidden"></div>
             </div>
+            </div>
         </section>
 
         <!-- Excel Sheet Selector Modal -->
@@ -285,6 +348,11 @@
                 </div>
 
                 <div class="top-right">
+                    <!-- Sound FX Toggle -->
+                    <button class="theme-toggle" id="sound-toggle-btn" title="Toggle Sound FX" style="margin-right: 5px;">
+                        <svg class="sound-off-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                    </button>
+
                     <!-- Sun/Moon Theme Toggle -->
                     <button class="theme-toggle" id="theme-toggle-btn" title="Toggle Theme">
                         <svg class="moon-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
@@ -2467,6 +2535,704 @@
                 </ul>
             </div>
         </div>
+
+    <!-- Cinematic Interaction Scripts -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // ================= SYNTHESIZER SOUND EFFECTS =================
+            class SoundFX {
+                constructor() {
+                    this.ctx = null;
+                    this.enabled = false;
+                }
+                init() {
+                    try {
+                        if (this.ctx) return;
+                        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                        if (AudioContextClass) {
+                            this.ctx = new AudioContextClass();
+                        }
+                    } catch (err) {
+                        console.warn("AudioContext init failed:", err);
+                    }
+                }
+                playTick() {
+                    try {
+                        if (!this.enabled) return;
+                        this.init();
+                        if (!this.ctx) return;
+                        const osc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+                        osc.connect(gain);
+                        gain.connect(this.ctx.destination);
+                        osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.08);
+                        gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+                        osc.start();
+                        osc.stop(this.ctx.currentTime + 0.08);
+                    } catch (err) {
+                        console.warn("playTick failed:", err);
+                    }
+                }
+                playChime() {
+                    try {
+                        if (!this.enabled) return;
+                        this.init();
+                        if (!this.ctx) return;
+                        const now = this.ctx.currentTime;
+                        const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+                        notes.forEach((freq, i) => {
+                            const osc = this.ctx.createOscillator();
+                            const gain = this.ctx.createGain();
+                            osc.connect(gain);
+                            gain.connect(this.ctx.destination);
+                            osc.frequency.setValueAtTime(freq, now + i * 0.06);
+                            gain.gain.setValueAtTime(0.03, now + i * 0.06);
+                            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.06 + 0.4);
+                            osc.start(now + i * 0.06);
+                            osc.stop(now + i * 0.06 + 0.4);
+                        });
+                    } catch (err) {
+                        console.warn("playChime failed:", err);
+                    }
+                }
+                playWipe() {
+                    try {
+                        if (!this.enabled) return;
+                        this.init();
+                        if (!this.ctx) return;
+                        const osc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+                        osc.connect(gain);
+                        gain.connect(this.ctx.destination);
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(450, this.ctx.currentTime + 0.25);
+                        gain.gain.setValueAtTime(0.02, this.ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+                        osc.start();
+                        osc.stop(this.ctx.currentTime + 0.25);
+                    } catch (err) {
+                        console.warn("playWipe failed:", err);
+                    }
+                }
+            }
+            const sfx = new SoundFX();
+
+            // Sound Toggle controller
+            const soundBtn = document.getElementById('sound-toggle-btn');
+            if (soundBtn) {
+                soundBtn.addEventListener('click', (e) => {
+                    sfx.enabled = !sfx.enabled;
+                    if (sfx.enabled) {
+                        sfx.init();
+                        soundBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>`;
+                        sfx.playChime();
+                    } else {
+                        soundBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>`;
+                    }
+                    e.stopPropagation();
+                });
+            }
+
+            // Play sfx on clicks
+            document.addEventListener('click', (e) => {
+                const btn = e.target.closest('a, button, .nav-item, .chat-chip-btn, .btn-add-tab');
+                if (btn) {
+                    sfx.playTick();
+                }
+            });
+
+            // ================= THEME SWEEP TRANSITIONS =================
+            const originalToggle = DOMTokenList.prototype.toggle;
+            let isTransitioningTheme = false;
+
+            DOMTokenList.prototype.toggle = function(token, force) {
+                try {
+                    if (token === 'light-theme' && document.startViewTransition && !isTransitioningTheme) {
+                        isTransitioningTheme = true;
+                        const e = window.event;
+                        const x = e && typeof e.clientX === 'number' ? e.clientX : window.innerWidth / 2;
+                        const y = e && typeof e.clientY === 'number' ? e.clientY : window.innerHeight / 2;
+                        const endRadius = Math.hypot(
+                            Math.max(x, window.innerWidth - x),
+                            Math.max(y, window.innerHeight - y)
+                        );
+                        
+                        const transition = document.startViewTransition(() => {
+                            originalToggle.call(this, token, force);
+                        });
+                        
+                        transition.ready.then(() => {
+                            const clipPath = [
+                                `circle(0px at ${x}px ${y}px)`,
+                                `circle(${endRadius}px at ${x}px ${y}px)`
+                            ];
+                            document.documentElement.animate(
+                                {
+                                    clipPath: document.body.classList.contains('light-theme')
+                                        ? clipPath
+                                        : [...clipPath].reverse()
+                                },
+                                {
+                                    duration: 550,
+                                    easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                                    pseudoElement: document.body.classList.contains('light-theme')
+                                        ? '::view-transition-new(root)'
+                                        : '::view-transition-old(root)'
+                                }
+                            );
+                            isTransitioningTheme = false;
+                        }).catch(() => {
+                            isTransitioningTheme = false;
+                        });
+                        
+                        return !this.contains(token);
+                    }
+                } catch (err) {
+                    console.error("Theme transition error:", err);
+                    isTransitioningTheme = false;
+                }
+                return originalToggle.apply(this, arguments);
+            };
+
+            // ================= PARTICLE BACKGROUND CANVAS =================
+            class ParticleSystem {
+                constructor(canvas) {
+                    this.canvas = canvas;
+                    this.ctx = canvas.getContext('2d');
+                    this.particles = [];
+                    this.bursts = [];
+                    this.mouseHistory = [];
+                    this.maxParticles = 110;
+                    this.mouse = { x: -1000, y: -1000, active: false };
+                    this.colors = ['#00F5FF', '#7B2FFF', '#FFB020'];
+                    this.init();
+                    this.resize();
+                    
+                    window.addEventListener('resize', () => this.resize());
+                    
+                    window.addEventListener('mousemove', (e) => {
+                        this.mouse.x = e.clientX;
+                        this.mouse.y = e.clientY;
+                        this.mouse.active = true;
+                        
+                        this.mouseHistory.push({ x: e.clientX, y: e.clientY, time: Date.now() });
+                    });
+                    
+                    window.addEventListener('mouseleave', () => {
+                        this.mouse.active = false;
+                    });
+                }
+                
+                init() {
+                    this.particles = [];
+                    for (let i = 0; i < this.maxParticles; i++) {
+                        this.particles.push({
+                            x: Math.random() * window.innerWidth,
+                            y: Math.random() * window.innerHeight,
+                            vx: (Math.random() - 0.5) * 0.3,
+                            vy: (Math.random() - 0.5) * 0.3,
+                            radius: Math.random() * 1.5 + 0.5,
+                            color: this.colors[Math.floor(Math.random() * this.colors.length)],
+                            alpha: Math.random() * 0.4 + 0.1
+                        });
+                    }
+                }
+                
+                resize() {
+                    this.canvas.width = window.innerWidth;
+                    this.canvas.height = window.innerHeight;
+                }
+                
+                triggerBurst(x, y) {
+                    const burstCount = 80;
+                    for (let i = 0; i < burstCount; i++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = Math.random() * 5 + 2;
+                        this.bursts.push({
+                            x: x || window.innerWidth / 2,
+                            y: y || window.innerHeight / 2,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed,
+                            radius: Math.random() * 2 + 1,
+                            color: this.colors[Math.floor(Math.random() * this.colors.length)],
+                            alpha: 1.0,
+                            decay: Math.random() * 0.02 + 0.01
+                        });
+                    }
+                }
+                
+                update() {
+                    const ctx = this.ctx;
+                    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                    
+                    // Draw fading mouse trail in dashboard
+                    const now = Date.now();
+                    this.mouseHistory = this.mouseHistory.filter(pt => now - pt.time < 350);
+                    if (this.mouseHistory.length > 1) {
+                        ctx.beginPath();
+                        ctx.moveTo(this.mouseHistory[0].x, this.mouseHistory[0].y);
+                        for (let i = 1; i < this.mouseHistory.length; i++) {
+                            ctx.lineTo(this.mouseHistory[i].x, this.mouseHistory[i].y);
+                        }
+                        ctx.strokeStyle = document.body.classList.contains('light-theme') 
+                            ? 'rgba(123, 47, 255, 0.08)' 
+                            : 'rgba(0, 245, 255, 0.15)';
+                        ctx.lineWidth = 3;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.stroke();
+                    }
+                    
+                    // Update and draw background nodes
+                    ctx.lineWidth = 0.5;
+                    for (let i = 0; i < this.particles.length; i++) {
+                        const p1 = this.particles[i];
+                        p1.x += p1.vx;
+                        p1.y += p1.vy;
+                        
+                        if (p1.x < 0 || p1.x > this.canvas.width) p1.vx *= -1;
+                        if (p1.y < 0 || p1.y > this.canvas.height) p1.vy *= -1;
+                        
+                        if (this.mouse.active) {
+                            const dx = p1.x - this.mouse.x;
+                            const dy = p1.y - this.mouse.y;
+                            const dist = Math.hypot(dx, dy);
+                            if (dist < 150) {
+                                const force = (150 - dist) / 150;
+                                const angle = Math.atan2(dy, dx);
+                                p1.x += Math.cos(angle) * force * 2.5;
+                                p1.y += Math.sin(angle) * force * 2.5;
+                            }
+                        }
+                        
+                        ctx.beginPath();
+                        ctx.arc(p1.x, p1.y, p1.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = p1.color;
+                        ctx.globalAlpha = p1.alpha;
+                        ctx.fill();
+                        
+                        for (let j = i + 1; j < this.particles.length; j++) {
+                            const p2 = this.particles[j];
+                            const dx = p1.x - p2.x;
+                            const dy = p1.y - p2.y;
+                            const dist = Math.hypot(dx, dy);
+                            if (dist < 90) {
+                                ctx.beginPath();
+                                ctx.moveTo(p1.x, p1.y);
+                                ctx.lineTo(p2.x, p2.y);
+                                ctx.strokeStyle = p1.color;
+                                ctx.globalAlpha = ((90 - dist) / 90) * (document.body.classList.contains('light-theme') ? 0.03 : 0.08);
+                                ctx.stroke();
+                            }
+                        }
+                    }
+                    
+                    // Update and draw bursts
+                    for (let i = this.bursts.length - 1; i >= 0; i--) {
+                        const b = this.bursts[i];
+                        b.x += b.vx;
+                        b.y += b.vy;
+                        b.vx *= 0.96;
+                        b.vy *= 0.96;
+                        b.alpha -= b.decay;
+                        
+                        if (b.alpha <= 0) {
+                            this.bursts.splice(i, 1);
+                            continue;
+                        }
+                        
+                        ctx.beginPath();
+                        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = b.color;
+                        ctx.globalAlpha = b.alpha;
+                        ctx.fill();
+                    }
+                    ctx.globalAlpha = 1.0;
+                }
+            }
+            
+            const canvas = document.getElementById('data-constellations-canvas');
+            if (canvas) {
+                const system = new ParticleSystem(canvas);
+                window.particles = system;
+                function loop() {
+                    system.update();
+                    requestAnimationFrame(loop);
+                }
+                loop();
+            }
+
+            // ================= SCREEN TRANSITION ALERTS & BURSTS =================
+            const uploadScreen = document.getElementById('upload-screen');
+            if (uploadScreen) {
+                const screenObserver = new MutationObserver(() => {
+                    if (uploadScreen.classList.contains('hidden')) {
+                        sfx.playChime();
+                        sfx.playWipe();
+                        if (window.particles) {
+                            window.particles.triggerBurst(window.innerWidth / 2, window.innerHeight / 2);
+                        }
+                    }
+                });
+                screenObserver.observe(uploadScreen, { attributes: true, attributeFilter: ['class'] });
+            }
+
+            // ================= FILE INGEST ROW STREAMING OVERLAY =================
+            const fileInput = document.getElementById('file-input');
+            const uploadContainer = document.querySelector('.upload-container');
+            if (fileInput && uploadContainer) {
+                fileInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        if (window.particles) {
+                            window.particles.triggerBurst(window.innerWidth * 0.75, window.innerHeight / 2);
+                        }
+                        
+                        const overlay = document.createElement('div');
+                        overlay.className = 'ingest-stream-overlay';
+                        overlay.innerHTML = `
+                            <div class="stream-header">
+                                <span class="stream-icon">⚡</span>
+                                <div>
+                                    <h4 style="margin:0;font-size:16px;">Ingesting ${file.name}</h4>
+                                    <p class="stream-meta" style="margin:2px 0 0 0;">${(file.size / 1024).toFixed(1)} KB · Tabular Mapping Schema...</p>
+                                </div>
+                            </div>
+                            <div class="stream-rows"></div>
+                        `;
+                        uploadContainer.appendChild(overlay);
+                        
+                        const rows = overlay.querySelector('.stream-rows');
+                        const headers = ['id', 'timestamp', 'metric_x', 'metric_y', 'conf_ratio', 'class'];
+                        let count = 0;
+                        const interval = setInterval(() => {
+                            if (!document.body.contains(overlay)) {
+                                clearInterval(interval);
+                                return;
+                            }
+                            const row = document.createElement('div');
+                            row.className = 'stream-row';
+                            row.innerHTML = headers.map(() => `<span>${Math.random().toString(36).substring(2, 6).toUpperCase()}</span>`).join('');
+                            rows.appendChild(row);
+                            rows.scrollTop = rows.scrollHeight;
+                            
+                            if (rows.children.length > 30) {
+                                rows.children[0].remove();
+                            }
+                            count++;
+                        }, 60);
+                    }
+                });
+            }
+
+            // ================= SPRING CURSOR PHYSICS =================
+            const cursor = document.getElementById('cursor-follower');
+            if (cursor) {
+                const dot = cursor.querySelector('.cursor-dot');
+                const ring = cursor.querySelector('.cursor-ring');
+                const label = cursor.querySelector('.cursor-label');
+                
+                let mouseX = -100, mouseY = -100;
+                let ringX = -100, ringY = -100;
+                
+                const stiffness = 0.085;
+                const friction = 0.78;
+                let vx = 0, vy = 0;
+                
+                document.addEventListener('mousemove', (e) => {
+                    mouseX = e.clientX;
+                    mouseY = e.clientY;
+                    
+                    dot.style.transform = `translate3d(${mouseX}px, ${mouseY}px, 0)`;
+                });
+                
+                function animateCursor() {
+                    const ax = (mouseX - ringX) * stiffness;
+                    const ay = (mouseY - ringY) * stiffness;
+                    vx = (vx + ax) * friction;
+                    vy = (vy + ay) * friction;
+                    ringX += vx;
+                    ringY += vy;
+                    
+                    ring.style.transform = `translate3d(${ringX}px, ${ringY}px, 0)`;
+                    if (label) {
+                        label.style.transform = `translate3d(${ringX + 18}px, ${ringY - 18}px, 0)`;
+                    }
+                    requestAnimationFrame(animateCursor);
+                }
+                animateCursor();
+                
+                const getContextLabel = (el) => {
+                    if (el.closest('.drop-zone')) return 'DROP FILE';
+                    if (el.closest('#btn-add-tab')) return 'ADD TAB';
+                    if (el.closest('#chat-send-btn')) return 'SEND';
+                    if (el.closest('#theme-toggle-btn')) return 'THEME';
+                    if (el.closest('#logo-btn') || el.closest('#logo-btn *')) return 'AuraEDA';
+                    if (el.closest('.sample-card')) return 'LOAD';
+                    if (el.closest('.nav-item')) {
+                        return (el.innerText || '').split('\n')[0].toUpperCase();
+                    }
+                    return '';
+                };
+                
+                const attachSwelling = () => {
+                    document.querySelectorAll('a, button, select, input, textarea, .nav-item, .drop-zone, .sample-card, .dataset-tab, .chat-chip-btn').forEach(el => {
+                        if (el.dataset.cursorBound) return;
+                        el.dataset.cursorBound = "true";
+                        el.addEventListener('mouseenter', () => {
+                            cursor.classList.add('hovered');
+                            const txt = getContextLabel(el);
+                            if (txt && label) {
+                                label.innerText = txt;
+                                label.classList.add('visible');
+                            }
+                        });
+                        el.addEventListener('mouseleave', () => {
+                            cursor.classList.remove('hovered');
+                            if (label) {
+                                label.classList.remove('visible');
+                                label.innerText = '';
+                            }
+                        });
+                    });
+                };
+                attachSwelling();
+                
+                const observer = new MutationObserver(attachSwelling);
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
+
+            // ================= 3D CARD REVEALS ON SCROLL =================
+            function revealOnScroll() {
+                const cards = document.querySelectorAll('.card, .mini-card, .table-container, .profile-card');
+                cards.forEach(card => {
+                    if (card.classList.contains('revealed')) return;
+                    const rect = card.getBoundingClientRect();
+                    if (rect.width === 0 && rect.height === 0) return; // Skip currently hidden elements
+                    
+                    const inView = rect.top < window.innerHeight * 0.98 && rect.bottom > 0;
+                    if (inView) {
+                        card.classList.add('revealed');
+                    }
+                });
+            }
+            
+            const contentPane = document.querySelector('.content-pane');
+            if (contentPane) {
+                contentPane.addEventListener('scroll', revealOnScroll);
+            }
+            window.addEventListener('scroll', revealOnScroll);
+            revealOnScroll();
+
+            // Debounced auto-trigger reveal
+            let revealTimeout = null;
+            function triggerReveal() {
+                if (revealTimeout) clearTimeout(revealTimeout);
+                revealTimeout = setTimeout(revealOnScroll, 30);
+                setTimeout(revealOnScroll, 120);
+                setTimeout(revealOnScroll, 300);
+                setTimeout(revealOnScroll, 600);
+            }
+
+            // Watch App changes (tab switching, modal toggles, dynamic data renders)
+            const appNode = document.getElementById('app');
+            if (appNode) {
+                const appObserver = new MutationObserver(triggerReveal);
+                appObserver.observe(appNode, { attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'style'] });
+            }
+
+            // Watch dashboard layout reveals (redundant backup trigger)
+            const dashboard = document.getElementById('dashboard');
+            if (dashboard) {
+                const dashObserver = new MutationObserver(() => {
+                    if (!dashboard.classList.contains('hidden')) {
+                        setTimeout(revealOnScroll, 100);
+                        setTimeout(startStatsObserver, 150);
+                    }
+                });
+                dashObserver.observe(dashboard, { attributes: true, attributeFilter: ['class'] });
+            }
+
+            // ================= CLICK RIPPLE GENERATOR =================
+            document.addEventListener('click', (e) => {
+                try {
+                    const btn = e.target.closest('.btn, .theme-toggle, .nav-item, .chat-chip-btn, .btn-add-tab');
+                    if (btn) {
+                        if (typeof btn.animate === 'function') {
+                            btn.animate([
+                                { transform: 'scale(1)' },
+                                { transform: 'scale(0.95)' },
+                                { transform: 'scale(1.02)' },
+                                { transform: 'scale(1)' }
+                            ], {
+                                duration: 250,
+                                easing: 'cubic-bezier(0.25, 0.8, 0.25, 1)'
+                            });
+                        }
+                        
+                        const rect = btn.getBoundingClientRect();
+                        const ripple = document.createElement('span');
+                        ripple.className = 'click-ripple';
+                        ripple.style.left = (e.clientX - rect.left) + 'px';
+                        ripple.style.top = (e.clientY - rect.top) + 'px';
+                        btn.appendChild(ripple);
+                        setTimeout(() => { ripple.remove(); }, 600);
+                    }
+                } catch (err) {
+                    console.warn("Click ripple animation failed safely:", err);
+                }
+            });
+
+            // ================= SCROLL PROGRESS BAR =================
+            if (contentPane) {
+                const progress = document.querySelector('.scroll-progress-bar');
+                contentPane.addEventListener('scroll', () => {
+                    const maxScroll = contentPane.scrollHeight - contentPane.clientHeight;
+                    if (maxScroll > 0) {
+                        const pct = (contentPane.scrollTop / maxScroll) * 100;
+                        progress.style.height = pct + '%';
+                    }
+                });
+            }
+
+            // ================= STAT NUMBER COUNTERS =================
+            function animateValue(obj, start, end, duration) {
+                let startTimestamp = null;
+                const step = (timestamp) => {
+                    if (!startTimestamp) startTimestamp = timestamp;
+                    const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                    const val = Math.floor(progress * (2 - progress) * (end - start) + start);
+                    obj.innerText = val.toLocaleString();
+                    if (progress < 1) {
+                        window.requestAnimationFrame(step);
+                    } else {
+                        obj.innerText = end.toLocaleString();
+                    }
+                };
+                window.requestAnimationFrame(step);
+            }
+
+            const countObserver = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    if (mutation.type === 'characterData' || mutation.type === 'childList') {
+                        const target = mutation.target.parentElement;
+                        if (target && target.tagName === 'H3' && target.closest('.mini-card')) {
+                            const text = target.innerText.replace(/,/g, '');
+                            const val = parseFloat(text);
+                            if (!isNaN(val) && !target.dataset.counting) {
+                                target.dataset.counting = "true";
+                                animateValue(target, 0, val, 1000);
+                                setTimeout(() => {
+                                    delete target.dataset.counting;
+                                }, 1200);
+                            }
+                        }
+                    }
+                });
+            });
+
+            function startStatsObserver() {
+                const grid = document.querySelector('.stats-cards-grid');
+                if (grid) {
+                    countObserver.observe(grid, { characterData: true, childList: true, subtree: true });
+                }
+            }
+
+            // ================= WORD MORPH ANIMATOR =================
+            const words = ['ANALYZE', 'PREDICT', 'UNDERSTAND', 'DISCOVER'];
+            let wordIdx = 0;
+            const morphWord = document.getElementById('morphing-word');
+            if (morphWord) {
+                setInterval(() => {
+                    wordIdx = (wordIdx + 1) % words.length;
+                    morphWord.style.opacity = 0;
+                    morphWord.style.transform = 'translateY(-10px) scale(0.95)';
+                    setTimeout(() => {
+                        morphWord.innerText = words[wordIdx];
+                        morphWord.style.opacity = 1;
+                        morphWord.style.transform = 'translateY(0) scale(1)';
+                    }, 300);
+                }, 2500);
+            }
+
+            // ================= MINI SVG LINE GRAPH =================
+            const path1 = document.querySelector('.chart-line-1');
+            const path2 = document.querySelector('.chart-line-2');
+            const dotsContainer = document.querySelector('.chart-dots');
+            let graphTime = 0;
+            function animateMiniChart() {
+                graphTime += 0.025;
+                let points1 = [];
+                let points2 = [];
+                for (let i = 0; i <= 25; i++) {
+                    const x = (i / 25) * 400;
+                    const y1 = 75 + Math.sin(graphTime + i * 0.3) * 30 + Math.cos(graphTime * 0.6 + i * 0.15) * 12;
+                    const y2 = 75 + Math.cos(graphTime * 0.75 + i * 0.25) * 20 + Math.sin(graphTime * 0.45 + i * 0.4) * 15;
+                    points1.push(`${x} ${y1}`);
+                    points2.push(`${x} ${y2}`);
+                }
+                if (path1) path1.setAttribute('d', 'M ' + points1.join(' L '));
+                if (path2) path2.setAttribute('d', 'M ' + points2.join(' L '));
+                
+                if (dotsContainer && points1.length > 0) {
+                    const lastPt = points1[points1.length - 1].split(' ');
+                    dotsContainer.innerHTML = `<circle cx="${lastPt[0]}" cy="${lastPt[1]}" r="4.5" fill="#00F5FF" class="pulsing-end-dot" />`;
+                }
+                requestAnimationFrame(animateMiniChart);
+            }
+            if (path1) animateMiniChart();
+
+            // ================= FLOATING SOCIAL BUBBLES =================
+            const chipsContainer = document.getElementById('floating-chips-container');
+            const phrases = [
+                '12M rows audited today',
+                'AutoML in 3 clicks',
+                '99.4% best model accuracy',
+                'Zero target leakage found',
+                'ARIMA forecasting ready',
+                'PowerPoint slides exported',
+                'GMM Profiling complete'
+            ];
+            if (chipsContainer) {
+                setInterval(() => {
+                    const chip = document.createElement('div');
+                    chip.className = 'floating-chip';
+                    chip.innerText = phrases[Math.floor(Math.random() * phrases.length)];
+                    chip.style.left = (Math.random() * 70 + 5) + '%';
+                    chip.style.animationDuration = (Math.random() * 4 + 7) + 's';
+                    chipsContainer.appendChild(chip);
+                    
+                    setTimeout(() => {
+                        chip.remove();
+                    }, 11000);
+                }, 2200);
+            }
+
+            // ================= computation THINKING INDICATOR =================
+            const thinkingDot = document.createElement('span');
+            thinkingDot.className = 'thinking-indicator-dot';
+            thinkingDot.title = 'AuraEDA Computation Engine Status';
+            const topBarBrand = document.querySelector('.top-bar .brand');
+            if (topBarBrand) {
+                topBarBrand.appendChild(thinkingDot);
+            }
+            
+            const loader = document.getElementById('loader');
+            if (loader) {
+                const loaderObserver = new MutationObserver(() => {
+                    if (!loader.classList.contains('hidden')) {
+                        thinkingDot.classList.add('thinking');
+                    } else {
+                        thinkingDot.classList.remove('thinking');
+                    }
+                });
+                loaderObserver.observe(loader, { attributes: true, attributeFilter: ['class'] });
+            }
+        });
+    </script>
 
     <!-- Script Entry Point -->
     <script src="/static/js/app.js"></script>
